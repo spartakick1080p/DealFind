@@ -1,0 +1,1 @@
+ALTER TABLE "monitored_websites" ADD COLUMN "product_schema" text;
