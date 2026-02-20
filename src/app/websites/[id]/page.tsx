@@ -8,6 +8,7 @@ import AddUrlForm from '@/components/add-url-form';
 import RemoveUrlButton from '@/components/remove-url-button';
 import SchemaEditor from '@/components/schema-editor';
 import AuthTokenInput from '@/components/auth-token-input';
+import WebhookManager from '@/components/webhook-manager';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -117,6 +118,9 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
 
       {/* Auth Token */}
       <AuthTokenInput websiteId={id} />
+
+      {/* Webhook Notifications */}
+      <WebhookManager websiteId={id} />
 
       {/* Product Schema Editor */}
       <SchemaEditor websiteId={id} initialSchema={website.productSchema} />

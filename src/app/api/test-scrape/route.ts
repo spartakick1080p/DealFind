@@ -70,9 +70,18 @@ export async function POST(request: Request) {
               try { authToken = decrypt(website.authToken); } catch { /* no token */ }
             }
 
+            // Merge query params from the test URL into the schema's static params
+            const mergedParams = { ...schema.extraction.apiParams };
+            try {
+              const pageUrl = new URL(validation.url);
+              pageUrl.searchParams.forEach((value, key) => {
+                mergedParams[key] = value;
+              });
+            } catch { /* use schema defaults */ }
+
             const apiResult = await fetchApiJson(schema.extraction.apiUrl, {
               method: schema.extraction.apiMethod,
-              params: schema.extraction.apiParams,
+              params: mergedParams,
               headers: schema.extraction.apiHeaders,
               body: schema.extraction.apiBody,
               authToken,

@@ -98,3 +98,16 @@ export const purchases = pgTable('purchases', {
   actualPrice: numeric('actual_price', { precision: 10, scale: 2 }).notNull(),
   purchasedAt: timestamp('purchased_at').defaultNow().notNull(),
 });
+export const webhooks = pgTable('webhooks', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  websiteId: uuid('website_id')
+    .references(() => monitoredWebsites.id, { onDelete: 'cascade' })
+    .notNull(),
+  service: varchar('service', { length: 64 }).notNull(), // 'discord' | 'slack' | etc.
+  webhookUrl: text('webhook_url').notNull(), // encrypted — URL or channel endpoint
+  authToken: text('webhook_auth_token'), // encrypted — bot token, API key, etc.
+  active: boolean('active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+

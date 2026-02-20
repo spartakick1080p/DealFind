@@ -23,6 +23,7 @@ import { parseWithSchema, parseFromApiData, parseSchemaJson, type ProductPageSch
 import { findMatchingFilters, type FilterCriteria } from '@/lib/filter-engine';
 import { isNewDeal, markAsSeen, cleanExpiredItems } from '@/lib/seen-tracker';
 import { createNotification } from '@/lib/notification-service';
+import { dispatchWebhooks, type DealPayload } from '@/lib/webhook-service';
 import { decrypt } from '@/lib/crypto';
 
 // ---------------------------------------------------------------------------
@@ -108,22 +109,27 @@ async function processUrl(
   authToken?: string,
   seenIds?: Set<string>,
   baseUrl?: string,
+  webhookDeals?: DealPayload[],
 ): Promise<void> {
-  const response = await fetchWithRetry(url, httpConfig);
-  if (!response) {
-    errors.push({ url, message: 'Failed to fetch (retries exhausted or unreachable)' });
-    return;
-  }
-
-  const html = await response.text();
-
   // If a custom schema is provided, use the schema-driven parser
   if (customSchema) {
-    // api-json: fetch from API directly
+    // api-json: fetch from API directly — skip HTML fetch entirely
     if (customSchema.extraction.method === 'api-json' && customSchema.extraction.apiUrl) {
+      // Merge query params from the product page URL into the schema's static params.
+      // This allows each URL (e.g. ?pageCategories=Electronics) to customise the API call.
+      const mergedParams = { ...customSchema.extraction.apiParams };
+      try {
+        const pageUrl = new URL(url);
+        pageUrl.searchParams.forEach((value, key) => {
+          mergedParams[key] = value;
+        });
+      } catch {
+        // URL parse failed — use schema defaults only
+      }
+
       const apiResult = await fetchApiJson(customSchema.extraction.apiUrl, {
         method: customSchema.extraction.apiMethod,
-        params: customSchema.extraction.apiParams,
+        params: mergedParams,
         headers: customSchema.extraction.apiHeaders,
         body: customSchema.extraction.apiBody,
         authToken,
@@ -142,11 +148,21 @@ async function processUrl(
           if (seenIds.has(variant.compositeId)) continue;
           seenIds.add(variant.compositeId);
         }
-        await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl);
+        await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals);
       }
       return;
     }
+  }
 
+  // Fetch the page HTML (needed for HTML-based schemas and default parser)
+  const response = await fetchWithRetry(url, httpConfig);
+  if (!response) {
+    errors.push({ url, message: 'Failed to fetch (retries exhausted or unreachable)' });
+    return;
+  }
+  const html = await response.text();
+
+  if (customSchema) {
     // HTML-based custom schema
     const { variants } = parseWithSchema(html, customSchema);
     result.totalProducts += variants.length;
@@ -156,7 +172,7 @@ async function processUrl(
         if (seenIds.has(variant.compositeId)) continue;
         seenIds.add(variant.compositeId);
       }
-      await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl);
+      await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals);
     }
     return;
   }
@@ -205,7 +221,7 @@ async function processUrl(
       if (seenIds.has(variant.compositeId)) continue;
       seenIds.add(variant.compositeId);
     }
-    await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl);
+    await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals);
   }
 }
 
@@ -215,6 +231,7 @@ async function evaluateAndPersist(
   ttlDays: number,
   result: { totalProducts: number; newDeals: number },
   baseUrl?: string,
+  webhookDeals?: DealPayload[],
 ): Promise<void> {
   const matchingFilters = findMatchingFilters(variant, activeFilters);
   if (matchingFilters.length === 0) return;
@@ -243,6 +260,19 @@ async function evaluateAndPersist(
   await markAsSeen(variant.compositeId, ttlDays);
   await createNotification(deal.id);
   result.newDeals++;
+
+  // Collect for webhook dispatch
+  if (webhookDeals) {
+    webhookDeals.push({
+      productName: variant.displayName,
+      brand: variant.brand,
+      listPrice: variant.listPrice.toFixed(2),
+      bestPrice: variant.bestPrice.toFixed(2),
+      discountPercentage: variant.discountPercentage.toFixed(2),
+      imageUrl: variant.imageUrl,
+      productUrl: resolveFullUrl(variant.productUrl, baseUrl),
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +369,7 @@ export async function executeScrapeJob(
 
     // Track seen compositeIds within this website to deduplicate across URLs
     const seenIds = new Set<string>();
+    const webhookDeals: DealPayload[] = [];
 
     for (const urlRow of urls) {
       const before = counters.totalProducts;
@@ -355,6 +386,7 @@ export async function executeScrapeJob(
           authToken,
           seenIds,
           website.baseUrl,
+          webhookDeals,
         );
 
         // Check if this URL produced any errors during processUrl
@@ -385,6 +417,13 @@ export async function executeScrapeJob(
           })
           .where(eq(productPageUrls.id, urlRow.id));
       }
+    }
+
+    // Dispatch webhooks for this website's new deals
+    try {
+      await dispatchWebhooks(website.id, webhookDeals);
+    } catch (err) {
+      console.error(`[scraper] Webhook dispatch failed for ${website.name}: ${err instanceof Error ? err.message : err}`);
     }
   }
 
