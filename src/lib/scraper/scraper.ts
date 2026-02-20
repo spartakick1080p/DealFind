@@ -54,7 +54,7 @@ const DEFAULT_HTTP_CONFIG: HttpClientConfig = {
   timeout: 12000,
 };
 
-const DEFAULT_MAX_PAGES = 10;
+const DEFAULT_MAX_PAGES = Infinity;
 const DEFAULT_TTL_DAYS = 7;
 
 // ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@
  */
 
 import { db } from '@/db';
-import { notifications, deals } from '@/db/schema';
+import { notifications, deals, filters } from '@/db/schema';
 import { eq, and, count, desc } from 'drizzle-orm';
 
 /**
@@ -26,6 +26,7 @@ export interface NotificationWithDeal {
     discountPercentage: string;
     imageUrl: string | null;
     productUrl: string;
+    filterName: string | null;
   };
 }
 
@@ -74,10 +75,12 @@ export async function getActiveNotifications(): Promise<NotificationWithDeal[]> 
         discountPercentage: deals.discountPercentage,
         imageUrl: deals.imageUrl,
         productUrl: deals.productUrl,
+        filterName: filters.name,
       },
     })
     .from(notifications)
     .innerJoin(deals, eq(notifications.dealId, deals.id))
+    .leftJoin(filters, eq(deals.filterId, filters.id))
     .where(eq(notifications.dismissed, false))
     .orderBy(desc(notifications.createdAt));
 
@@ -102,4 +105,29 @@ export async function dismiss(notificationId: string): Promise<void> {
     .update(notifications)
     .set({ dismissed: true })
     .where(eq(notifications.id, notificationId));
+}
+
+/**
+ * Mark all non-dismissed notifications as read.
+ */
+export async function markAllAsRead(): Promise<void> {
+  await db
+    .update(notifications)
+    .set({ read: true })
+    .where(
+      and(
+        eq(notifications.dismissed, false),
+        eq(notifications.read, false),
+      ),
+    );
+}
+
+/**
+ * Dismiss all non-dismissed notifications.
+ */
+export async function dismissAll(): Promise<void> {
+  await db
+    .update(notifications)
+    .set({ dismissed: true })
+    .where(eq(notifications.dismissed, false));
 }
