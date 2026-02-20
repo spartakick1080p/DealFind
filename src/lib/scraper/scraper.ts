@@ -341,6 +341,7 @@ export async function executeScrapeJob(
     const seenIds = new Set<string>();
 
     for (const urlRow of urls) {
+      const before = counters.totalProducts;
       try {
         await processUrl(
           urlRow.url,
@@ -355,10 +356,34 @@ export async function executeScrapeJob(
           seenIds,
           website.baseUrl,
         );
+
+        // Check if this URL produced any errors during processUrl
+        const urlError = errors.find((e) => e.url === urlRow.url);
+        const productsFromUrl = counters.totalProducts - before;
+
+        await db
+          .update(productPageUrls)
+          .set({
+            lastScrapeStatus: urlError ? 'error' : 'ok',
+            lastScrapeError: urlError?.message ?? null,
+            lastScrapeCount: productsFromUrl,
+            lastScrapedAt: new Date(),
+          })
+          .where(eq(productPageUrls.id, urlRow.id));
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(`[scraper] Error processing ${urlRow.url}: ${message}`);
         errors.push({ url: urlRow.url, message });
+
+        await db
+          .update(productPageUrls)
+          .set({
+            lastScrapeStatus: 'error',
+            lastScrapeError: message,
+            lastScrapeCount: 0,
+            lastScrapedAt: new Date(),
+          })
+          .where(eq(productPageUrls.id, urlRow.id));
       }
     }
   }

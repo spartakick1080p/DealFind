@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getWebsiteById } from '../actions';
 import { getUrlsByWebsite } from './actions';
+import { productPageUrls } from '@/db/schema';
 import EditWebsiteForm from '@/components/edit-website-form';
 import AddUrlForm from '@/components/add-url-form';
 import RemoveUrlButton from '@/components/remove-url-button';
@@ -21,7 +22,7 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
   }
   const website = websiteResult.data;
 
-  let urls: { id: string; websiteId: string; url: string; createdAt: Date }[] = [];
+  let urls: (typeof productPageUrls.$inferSelect)[] = [];
   try {
     const urlsResult = await getUrlsByWebsite(id);
     if (urlsResult.success) {
@@ -58,6 +59,7 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
                 <thead>
                   <tr>
                     <th>URL</th>
+                    <th>Status</th>
                     <th className="text-right">Actions</th>
                   </tr>
                 </thead>
@@ -73,6 +75,29 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
                         >
                           {u.url}
                         </a>
+                      </td>
+                      <td>
+                        {u.lastScrapeStatus === 'ok' && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="badge badge-success badge-xs">OK</span>
+                            <span className="text-xs text-base-content/50">
+                              {u.lastScrapeCount ?? 0} products
+                            </span>
+                          </div>
+                        )}
+                        {u.lastScrapeStatus === 'error' && (
+                          <div className="tooltip tooltip-error" data-tip={u.lastScrapeError ?? 'Unknown error'}>
+                            <span className="badge badge-error badge-xs cursor-help">Error</span>
+                          </div>
+                        )}
+                        {!u.lastScrapeStatus && (
+                          <span className="badge badge-ghost badge-xs">Not scraped</span>
+                        )}
+                        {u.lastScrapedAt && (
+                          <div className="text-[10px] text-base-content/40 mt-0.5">
+                            {new Date(u.lastScrapedAt).toLocaleString()}
+                          </div>
+                        )}
                       </td>
                       <td className="text-right">
                         <RemoveUrlButton urlId={u.id} />
