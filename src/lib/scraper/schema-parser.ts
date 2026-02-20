@@ -45,6 +45,33 @@ export interface ExtractionConfig {
   apiHeaders?: Record<string, string>;
   /** JSON body template for POST requests. Use {variable} for substitution from the page URL. */
   apiBody?: Record<string, unknown>;
+
+  // --- api-json pagination ---
+  /** Pagination config for api-json schemas. When present, the scraper will
+   *  loop through pages until all products are fetched. */
+  pagination?: ApiPaginationConfig;
+}
+
+export interface ApiPaginationConfig {
+  /** How pagination is controlled: 'offset' (offset/limit in body) or 'page' (page param) */
+  style: 'offset' | 'page';
+  /** Where to send pagination params: 'body' (default) or 'query' (URL query params) */
+  paginationIn?: 'body' | 'query';
+  /** Body field name for the offset value (default: 'offset') */
+  offsetParam?: string;
+  /** Body field name for the page size (default: 'limit') */
+  limitParam?: string;
+  /** Number of items per page (default: 120) */
+  pageSize?: number;
+  /** Dot-path to the total item count in the API response (default: 'total') */
+  totalPath?: string;
+  /**
+   * Template for the cursor/offset query param value.
+   * Use `{offset}` as a placeholder for the numeric offset.
+   * Example: "offset:{offset}" produces "offset:120", "offset:240", etc.
+   * When set, only the offsetParam query param is sent (limitParam is omitted).
+   */
+  cursorTemplate?: string;
 }
 
 export interface PathConfig {
@@ -66,6 +93,8 @@ export interface FieldMappings {
   description?: string;
   brand?: string;
   listPrice: string;
+  /** MSRP / compare-at price. When present and higher than listPrice, used as the reference price for discount calculation. */
+  msrp?: string;
   activePrice?: string;
   salePrice?: string;
   imageUrl?: string;
@@ -379,6 +408,14 @@ function extractFromData(
   return { variants: [], pageType: 'unknown' };
 }
 
+// Debug: global sample counter for variant price logging
+let _debugSampleCount = 0;
+
+/** Reset the debug sample counter (call at start of each scrape job) */
+export function resetDebugSampleCount(): void {
+  _debugSampleCount = 0;
+}
+
 function extractVariantsFromProduct(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   product: any,
@@ -409,19 +446,42 @@ function extractVariantsFromProduct(
       }
     }
 
-    const listPrice = normalisePrice(resolvePath(merged, fields.listPrice));
+    let rawListPrice = resolvePath(merged, fields.listPrice);
+    let listPrice = normalisePrice(rawListPrice);
+    // Fallback: use msrp if listPrice is missing
+    if (listPrice == null && fields.msrp) {
+      listPrice = normalisePrice(resolvePath(merged, fields.msrp));
+    }
     if (listPrice == null || listPrice <= 0) continue;
 
-    const activePrice = fields.activePrice
+    // If msrp is mapped and higher than listPrice, use it as the reference price
+    let referencePrice = listPrice;
+    if (fields.msrp) {
+      const msrp = normalisePrice(resolvePath(merged, fields.msrp));
+      if (msrp != null && msrp > listPrice) {
+        referencePrice = msrp;
+      }
+    }
+
+    // Try activePrice, then fall back to 'price' field (matches original Lambda logic)
+    let activePrice = fields.activePrice
       ? normalisePrice(resolvePath(merged, fields.activePrice))
       : null;
+    if (activePrice == null) {
+      const fallbackPrice = normalisePrice(resolvePath(merged, 'price'));
+      if (fallbackPrice != null) {
+        activePrice = fallbackPrice;
+      }
+    }
     const salePrice = fields.salePrice
       ? normalisePrice(resolvePath(merged, fields.salePrice))
       : null;
 
     const best = pickBestPrice(activePrice, salePrice);
-    const bestPrice = best != null && best < listPrice ? best : listPrice;
-    const discountPercentage = computeDiscount(listPrice, bestPrice);
+    // If no candidate prices at all, skip this variant (no discount can be computed)
+    if (best == null) continue;
+    const bestPrice = best < referencePrice ? best : listPrice;
+    const discountPercentage = computeDiscount(referencePrice, bestPrice);
 
     const productId = String(resolvePath(merged, fields.productId) ?? 'unknown');
     const skuId = fields.skuId
@@ -430,6 +490,18 @@ function extractVariantsFromProduct(
     const displayName = String(
       resolvePath(merged, fields.displayName) ?? 'Unknown Product'
     );
+
+    // Debug: log identity fields for the first 10 variants to diagnose unique product counting
+    if (_debugSampleCount < 10) {
+      _debugSampleCount++;
+      const msrpNote = referencePrice !== listPrice ? `, msrp=${referencePrice}` : '';
+      console.log(
+        `[schema-parser] Sample variant: productId="${productId}", skuId="${skuId}", ` +
+        `name="${displayName}", listPrice=${listPrice}${msrpNote}, ` +
+        `activePrice=${activePrice}, salePrice=${salePrice}, ` +
+        `bestPrice=${bestPrice}, discount=${discountPercentage}%`,
+      );
+    }
     const description = fields.description
       ? (resolvePath(merged, fields.description)?.toString() ?? null)
       : null;
@@ -447,11 +519,13 @@ function extractVariantsFromProduct(
       : [];
     // For stock status, prefer the product-level value over variant-level
     // (variant stockStatus can be unreliable — e.g. always true)
+    // But treat null/undefined product-level stock as "unknown" and fall through
+    // to variant-level check.
     let inStock = true;
     if (fields.inStock) {
       const productStock = resolvePath(product, fields.inStock);
-      if (productStock !== undefined) {
-        // Product-level stock is authoritative
+      if (productStock !== undefined && productStock !== null) {
+        // Product-level stock is authoritative when present
         inStock = normaliseStock(productStock);
       } else {
         // Fall back to variant-level
@@ -467,7 +541,7 @@ function extractVariantsFromProduct(
       displayName,
       description,
       brand,
-      listPrice,
+      listPrice: referencePrice,
       activePrice,
       salePrice,
       bestPrice,

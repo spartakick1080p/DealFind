@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { createFilter, updateFilter } from '@/app/filters/actions';
+import CategorySelect from './category-select';
 
 interface FilterData {
   id: string;
@@ -9,6 +10,7 @@ interface FilterData {
   discountThreshold: number;
   maxPrice: string | null;
   keywords: string[] | null;
+  includedCategories: string[] | null;
   excludedCategories: string[] | null;
   active: boolean;
 }
@@ -28,8 +30,11 @@ export default function AddFilterForm({
   const [keywords, setKeywords] = useState(
     editFilter?.keywords?.join(', ') ?? ''
   );
-  const [excludedCategories, setExcludedCategories] = useState(
-    editFilter?.excludedCategories?.join(', ') ?? ''
+  const [includedCategories, setIncludedCategories] = useState<string[]>(
+    editFilter?.includedCategories ?? []
+  );
+  const [excludedCategories, setExcludedCategories] = useState<string[]>(
+    editFilter?.excludedCategories ?? []
   );
   const [active, setActive] = useState(editFilter?.active ?? true);
   const [error, setError] = useState('');
@@ -69,7 +74,8 @@ export default function AddFilterForm({
         discountThreshold: threshold,
         maxPrice: parsedMaxPrice,
         keywords: parseCommaSeparated(keywords),
-        excludedCategories: parseCommaSeparated(excludedCategories),
+        includedCategories: includedCategories.length > 0 ? includedCategories : null,
+        excludedCategories: excludedCategories.length > 0 ? excludedCategories : null,
         active,
       };
 
@@ -83,7 +89,8 @@ export default function AddFilterForm({
           setDiscountThreshold('');
           setMaxPrice('');
           setKeywords('');
-          setExcludedCategories('');
+          setIncludedCategories([]);
+          setExcludedCategories([]);
           setActive(true);
         }
         onDone?.();
@@ -163,20 +170,18 @@ export default function AddFilterForm({
               className="input input-bordered w-full"
             />
           </div>
-          <div className="form-control sm:col-span-2">
-            <label className="label py-1">
-              <span className="label-text">
-                Excluded Categories (comma-separated)
-              </span>
-            </label>
-            <input
-              type="text"
-              placeholder="clothing, toys"
-              value={excludedCategories}
-              onChange={(e) => setExcludedCategories(e.target.value)}
-              className="input input-bordered w-full"
-            />
-          </div>
+          <CategorySelect
+            label="Include Categories (match any)"
+            selected={includedCategories}
+            onChange={setIncludedCategories}
+            placeholder="All categories"
+          />
+          <CategorySelect
+            label="Exclude Categories"
+            selected={excludedCategories}
+            onChange={setExcludedCategories}
+            placeholder="None excluded"
+          />
           {isEditing && (
             <div className="form-control">
               <label className="label cursor-pointer justify-start gap-3 py-1">

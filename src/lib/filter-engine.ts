@@ -1,3 +1,5 @@
+import { matchesAnyCategory, matchesAnyExcludedCategory } from './categories';
+
 export interface ProductVariant {
   productId: string;
   skuId: string | null;
@@ -18,6 +20,7 @@ export interface FilterCriteria {
   discountThreshold: number; // 1-99
   maxPrice: number | null;
   keywords: string[];
+  includedCategories: string[];
   excludedCategories: string[];
 }
 
@@ -27,23 +30,24 @@ export interface FilterCriteria {
  * - Discount: variant.discountPercentage must be >= filter.discountThreshold
  * - Max price: if set, variant.bestPrice must be <= filter.maxPrice
  * - Keywords: if non-empty, variant.displayName must contain at least one keyword (case-insensitive)
- * - Excluded categories: if non-empty, none of the variant's categories may match an excluded category (case-insensitive)
+ * - Included categories: if non-empty, product must match at least one (via alias mapping)
+ * - Excluded categories: if non-empty, product must NOT match any (via alias mapping)
  */
 export function evaluateVariant(
   variant: ProductVariant,
   filter: FilterCriteria
 ): boolean {
-  // Req 7.1 — discount threshold
+  // Discount threshold
   if (variant.discountPercentage < filter.discountThreshold) {
     return false;
   }
 
-  // Req 7.2 — max price check
+  // Max price check
   if (filter.maxPrice !== null && variant.bestPrice > filter.maxPrice) {
     return false;
   }
 
-  // Req 7.3 — keyword matching (case-insensitive)
+  // Keyword matching (case-insensitive)
   if (filter.keywords.length > 0) {
     const nameLower = variant.displayName.toLowerCase();
     const hasKeyword = filter.keywords.some((kw) =>
@@ -54,13 +58,16 @@ export function evaluateVariant(
     }
   }
 
-  // Req 7.4 — category exclusion (case-insensitive)
+  // Included categories — product must match at least one
+  if (filter.includedCategories.length > 0) {
+    if (!matchesAnyCategory(filter.includedCategories, variant.categories)) {
+      return false;
+    }
+  }
+
+  // Excluded categories — product must NOT match any
   if (filter.excludedCategories.length > 0) {
-    const excludedLower = filter.excludedCategories.map((c) => c.toLowerCase());
-    const hasExcluded = variant.categories.some((cat) =>
-      excludedLower.includes(cat.toLowerCase())
-    );
-    if (hasExcluded) {
+    if (matchesAnyExcludedCategory(filter.excludedCategories, variant.categories)) {
       return false;
     }
   }
@@ -70,7 +77,7 @@ export function evaluateVariant(
 
 /**
  * Returns the subset of filters that the variant qualifies against.
- * A variant is considered a Deal if the returned array is non-empty (Req 7.5).
+ * A variant is considered a Deal if the returned array is non-empty.
  */
 export function findMatchingFilters(
   variant: ProductVariant,

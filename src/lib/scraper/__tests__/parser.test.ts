@@ -527,7 +527,7 @@ describe('edge cases', () => {
     expect(extractProductVariants(payload)).toEqual([]);
   });
 
-  it('bestPrice falls back to listPrice when no sale/active prices', () => {
+  it('skips variants with no sale/active prices (no discount computable)', () => {
     const payload = makeListingPayload([
       {
         productId: 'no-sale',
@@ -535,9 +535,7 @@ describe('edge cases', () => {
         variants: [{ skuId: 'a', listPrice: 100 }],
       },
     ]);
-    const v = extractProductVariants(payload)[0];
-    expect(v.bestPrice).toBe(100);
-    expect(v.discountPercentage).toBe(0);
+    expect(extractProductVariants(payload)).toEqual([]);
   });
 
   it('bestPrice falls back to listPrice when sale price exceeds list price', () => {

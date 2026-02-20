@@ -9,6 +9,7 @@ export default async function FiltersPage() {
     discountThreshold: number;
     maxPrice: string | null;
     keywords: string[] | null;
+    includedCategories: string[] | null;
     excludedCategories: string[] | null;
     active: boolean;
   }[] = [];

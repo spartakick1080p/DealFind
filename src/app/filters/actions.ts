@@ -32,6 +32,7 @@ export async function createFilter(data: {
   discountThreshold: number;
   maxPrice?: number | null;
   keywords?: string[] | null;
+  includedCategories?: string[] | null;
   excludedCategories?: string[] | null;
 }): Promise<ActionResult<typeof filters.$inferSelect>> {
   const trimmedName = data.name?.trim();
@@ -58,6 +59,7 @@ export async function createFilter(data: {
         discountThreshold: data.discountThreshold,
         maxPrice: data.maxPrice != null ? String(data.maxPrice) : null,
         keywords: data.keywords ?? null,
+        includedCategories: data.includedCategories ?? null,
         excludedCategories: data.excludedCategories ?? null,
       })
       .returning();
@@ -78,6 +80,7 @@ export async function updateFilter(
     discountThreshold?: number;
     maxPrice?: number | null;
     keywords?: string[] | null;
+    includedCategories?: string[] | null;
     excludedCategories?: string[] | null;
     active?: boolean;
   }
@@ -108,6 +111,7 @@ export async function updateFilter(
     if (data.discountThreshold !== undefined) updateValues.discountThreshold = data.discountThreshold;
     if (data.maxPrice !== undefined) updateValues.maxPrice = data.maxPrice != null ? String(data.maxPrice) : null;
     if (data.keywords !== undefined) updateValues.keywords = data.keywords;
+    if (data.includedCategories !== undefined) updateValues.includedCategories = data.includedCategories;
     if (data.excludedCategories !== undefined) updateValues.excludedCategories = data.excludedCategories;
     if (data.active !== undefined) updateValues.active = data.active;
 

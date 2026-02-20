@@ -4,6 +4,7 @@ import { useState, useMemo, useTransition } from 'react';
 import Image from 'next/image';
 import type { NotificationWithDeal } from '@/lib/notification-service';
 import NotificationActions from './notification-actions';
+import { CATEGORIES } from '@/lib/categories';
 
 type SortOption = 'newest' | 'discount-desc' | 'discount-asc' | 'price-asc' | 'price-desc';
 
@@ -15,6 +16,14 @@ interface NotificationListProps {
   onDismissAll: () => Promise<void>;
 }
 
+/** Check if a notification's product name or brand fuzzy-matches a canonical category */
+function matchesCategory(n: NotificationWithDeal, categoryValue: string): boolean {
+  const def = CATEGORIES.find((c) => c.value === categoryValue);
+  if (!def) return false;
+  const text = `${n.deal.productName} ${n.deal.brand ?? ''}`.toLowerCase();
+  return def.aliases.some((alias) => text.includes(alias));
+}
+
 export default function NotificationList({
   notifications,
   onMarkAsRead,
@@ -24,6 +33,7 @@ export default function NotificationList({
 }: NotificationListProps) {
   const [brandFilter, setBrandFilter] = useState('');
   const [filterFilter, setFilterFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [sort, setSort] = useState<SortOption>('newest');
   const [isBulkPending, startBulkTransition] = useTransition();
 
@@ -44,6 +54,22 @@ export default function NotificationList({
     return [...set].sort();
   }, [notifications]);
 
+  // Build category list with counts (only categories that match at least one notification)
+  const availableCategories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const n of notifications) {
+      for (const cat of CATEGORIES) {
+        if (matchesCategory(n, cat.value)) {
+          counts.set(cat.value, (counts.get(cat.value) ?? 0) + 1);
+        }
+      }
+    }
+    return CATEGORIES
+      .filter((c) => counts.has(c.value))
+      .map((c) => ({ value: c.value, label: c.label, count: counts.get(c.value)! }))
+      .sort((a, b) => b.count - a.count);
+  }, [notifications]);
+
   // Apply filters and sort
   const filtered = useMemo(() => {
     let list = notifications;
@@ -53,6 +79,9 @@ export default function NotificationList({
     }
     if (filterFilter) {
       list = list.filter((n) => n.deal.filterName === filterFilter);
+    }
+    if (categoryFilter) {
+      list = list.filter((n) => matchesCategory(n, categoryFilter));
     }
 
     const sorted = [...list];
@@ -75,7 +104,7 @@ export default function NotificationList({
     }
 
     return sorted;
-  }, [notifications, brandFilter, filterFilter, sort]);
+  }, [notifications, brandFilter, filterFilter, categoryFilter, sort]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
@@ -112,6 +141,23 @@ export default function NotificationList({
                   <option value="">All filters</option>
                   {filterNames.map((f) => (
                     <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            {/* Category filter */}
+            {availableCategories.length > 0 && (
+              <label className="form-control">
+                <div className="label py-0"><span className="label-text text-xs">Category</span></div>
+                <select
+                  className="select select-bordered select-sm w-44"
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                >
+                  <option value="">All categories</option>
+                  {availableCategories.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label} ({c.count})</option>
                   ))}
                 </select>
               </label>

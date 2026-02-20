@@ -268,13 +268,23 @@ function buildVariants(product: any, variants: any[]): ProductVariant[] {
   const results: ProductVariant[] = [];
 
   for (const v of variants) {
-    const listPrice = normaliseMoney(v.listPrice);
+    let listPrice = normaliseMoney(v.listPrice);
+    // Fallback: use msrp if listPrice is missing (matches original Lambda logic)
+    if (listPrice == null) {
+      listPrice = normaliseMoney(v.msrp);
+    }
     if (listPrice == null || listPrice <= 0) continue;
 
-    const activePrice = normaliseMoney(v.activePrice);
+    // Try activePrice, then fall back to 'price' field (matches original Lambda logic)
+    let activePrice = normaliseMoney(v.activePrice);
+    if (activePrice == null) {
+      activePrice = normaliseMoney(v.price);
+    }
     const salePrice = normaliseMoney(v.salePrice);
     const best = pickBestPrice(activePrice, salePrice);
-    const bestPrice = best != null && best < listPrice ? best : listPrice;
+    // If no candidate prices at all, skip this variant (no discount can be computed)
+    if (best == null) continue;
+    const bestPrice = best < listPrice ? best : listPrice;
     const discountPercentage = computeDiscount(listPrice, bestPrice);
 
     const skuId = extractSkuId(v);

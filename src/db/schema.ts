@@ -50,6 +50,7 @@ export const filters = pgTable('filters', {
   discountThreshold: integer('discount_threshold').notNull(),
   maxPrice: numeric('max_price', { precision: 10, scale: 2 }),
   keywords: text('keywords').array(),
+  includedCategories: text('included_categories').array(),
   excludedCategories: text('excluded_categories').array(),
   active: boolean('active').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),

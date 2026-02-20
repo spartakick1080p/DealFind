@@ -30,6 +30,7 @@ function makeFilter(overrides: Partial<FilterCriteria> = {}): FilterCriteria {
     discountThreshold: 10,
     maxPrice: null,
     keywords: [],
+    includedCategories: [],
     excludedCategories: [],
     ...overrides,
   };
@@ -114,7 +115,7 @@ describe('evaluateVariant', () => {
     });
   });
 
-  describe('category exclusion (Req 7.4)', () => {
+  describe('category exclusion', () => {
     it('qualifies when excludedCategories is empty (skip check)', () => {
       const variant = makeVariant({ categories: ['Electronics'] });
       const filter = makeFilter({ excludedCategories: [] });
@@ -123,19 +124,51 @@ describe('evaluateVariant', () => {
 
     it('qualifies when variant categories do not match any excluded', () => {
       const variant = makeVariant({ categories: ['Electronics', 'Audio'] });
-      const filter = makeFilter({ excludedCategories: ['Clothing', 'Food'] });
+      const filter = makeFilter({ excludedCategories: ['clothing', 'food'] });
       expect(evaluateVariant(variant, filter)).toBe(true);
     });
 
-    it('disqualifies when a variant category matches an excluded category', () => {
-      const variant = makeVariant({ categories: ['Electronics', 'Refurbished'] });
-      const filter = makeFilter({ excludedCategories: ['Refurbished'] });
+    it('disqualifies when a variant category matches an excluded canonical category', () => {
+      const variant = makeVariant({ categories: ['Consumer Electronics', 'Laptops'] });
+      const filter = makeFilter({ excludedCategories: ['electronics'] });
       expect(evaluateVariant(variant, filter)).toBe(false);
     });
 
-    it('disqualifies with case-insensitive category match', () => {
-      const variant = makeVariant({ categories: ['ELECTRONICS'] });
-      const filter = makeFilter({ excludedCategories: ['electronics'] });
+    it('disqualifies via alias substring matching', () => {
+      const variant = makeVariant({ categories: ['Outdoor Recreation'] });
+      const filter = makeFilter({ excludedCategories: ['sports'] });
+      expect(evaluateVariant(variant, filter)).toBe(false);
+    });
+  });
+
+  describe('included categories', () => {
+    it('qualifies when includedCategories is empty (match all)', () => {
+      const variant = makeVariant({ categories: ['Anything'] });
+      const filter = makeFilter({ includedCategories: [] });
+      expect(evaluateVariant(variant, filter)).toBe(true);
+    });
+
+    it('qualifies when product matches an included category via alias', () => {
+      const variant = makeVariant({ categories: ['Consumer Electronics'] });
+      const filter = makeFilter({ includedCategories: ['electronics'] });
+      expect(evaluateVariant(variant, filter)).toBe(true);
+    });
+
+    it('disqualifies when product does not match any included category', () => {
+      const variant = makeVariant({ categories: ['Clothing'] });
+      const filter = makeFilter({ includedCategories: ['electronics', 'sports'] });
+      expect(evaluateVariant(variant, filter)).toBe(false);
+    });
+
+    it('qualifies when product matches at least one of multiple included categories', () => {
+      const variant = makeVariant({ categories: ['Hiking Gear'] });
+      const filter = makeFilter({ includedCategories: ['electronics', 'sports'] });
+      expect(evaluateVariant(variant, filter)).toBe(true);
+    });
+
+    it('disqualifies when product has no categories and included is set', () => {
+      const variant = makeVariant({ categories: [] });
+      const filter = makeFilter({ includedCategories: ['electronics'] });
       expect(evaluateVariant(variant, filter)).toBe(false);
     });
   });
@@ -152,7 +185,8 @@ describe('evaluateVariant', () => {
         discountThreshold: 30,
         maxPrice: 50,
         keywords: ['nike'],
-        excludedCategories: ['Clothing'],
+        includedCategories: ['shoes'],
+        excludedCategories: ['clothing'],
       });
       expect(evaluateVariant(variant, filter)).toBe(true);
     });
@@ -168,7 +202,7 @@ describe('evaluateVariant', () => {
         discountThreshold: 30,
         maxPrice: 50,
         keywords: ['nike'],
-        excludedCategories: ['Clothing'],
+        excludedCategories: ['clothing'],
       });
       expect(evaluateVariant(variant, filter)).toBe(false);
     });

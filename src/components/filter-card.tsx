@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import AddFilterForm from './add-filter-form';
 import DeleteFilterButton from './delete-filter-button';
+import { CATEGORIES } from '@/lib/categories';
 
 interface FilterData {
   id: string;
@@ -10,8 +11,16 @@ interface FilterData {
   discountThreshold: number;
   maxPrice: string | null;
   keywords: string[] | null;
+  includedCategories: string[] | null;
   excludedCategories: string[] | null;
   active: boolean;
+}
+
+function categoryLabels(values: string[] | null): string | null {
+  if (!values || values.length === 0) return null;
+  return values
+    .map((v) => CATEGORIES.find((c) => c.value === v)?.label ?? v)
+    .join(', ');
 }
 
 export default function FilterCard({ filter }: { filter: FilterData }) {
@@ -22,6 +31,9 @@ export default function FilterCard({ filter }: { filter: FilterData }) {
       <AddFilterForm editFilter={filter} onDone={() => setEditing(false)} />
     );
   }
+
+  const includedLabel = categoryLabels(filter.includedCategories);
+  const excludedLabel = categoryLabels(filter.excludedCategories);
 
   return (
     <div className="card bg-base-300 shadow-lg">
@@ -65,13 +77,19 @@ export default function FilterCard({ filter }: { filter: FilterData }) {
             )}
           </span>
 
+          <span className="text-base-content/60">Categories</span>
+          <span>
+            {includedLabel ? (
+              <span className="text-base-content/80">{includedLabel}</span>
+            ) : (
+              <span className="text-base-content/40">All</span>
+            )}
+          </span>
+
           <span className="text-base-content/60">Excluded</span>
           <span>
-            {filter.excludedCategories &&
-            filter.excludedCategories.length > 0 ? (
-              <span className="text-base-content/80">
-                {filter.excludedCategories.join(', ')}
-              </span>
+            {excludedLabel ? (
+              <span className="text-base-content/80">{excludedLabel}</span>
             ) : (
               <span className="text-base-content/40">None</span>
             )}

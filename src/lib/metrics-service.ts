@@ -69,3 +69,14 @@ export async function markAsPurchased(dealId: string, actualPrice: number): Prom
 
   revalidatePath('/');
 }
+
+/**
+ * Delete all deals (and related purchases / notifications) to clear the dashboard.
+ * Revalidates the dashboard after deletion.
+ */
+export async function clearAllDeals(): Promise<void> {
+  await db.delete(purchases);
+  await db.delete(deals);
+  revalidatePath('/');
+}
+

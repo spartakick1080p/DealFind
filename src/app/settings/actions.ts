@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { executeScrapeJob, type ScrapeResult } from '@/lib/scraper/scraper';
+import { failProgress } from '@/lib/scrape-progress';
 
 // ---------------------------------------------------------------------------
 // Module-level concurrency flag (mirrors the cron route guard).
@@ -31,6 +32,7 @@ export async function triggerScrape(): Promise<
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.error('[settings/triggerScrape] Error:', message);
+    failProgress(message);
     return { success: false, error: message };
   } finally {
     isRunning = false;
