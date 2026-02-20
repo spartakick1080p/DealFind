@@ -9,7 +9,7 @@
 
 import { db } from '@/db';
 import { deals, filters, monitoredWebsites, productPageUrls } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 import { fetchWithRetry, fetchApiJson, type HttpClientConfig } from './http-client';
 import {
@@ -261,6 +261,7 @@ export async function executeScrapeJob(
   httpConfig: HttpClientConfig = DEFAULT_HTTP_CONFIG,
   maxPages: number = DEFAULT_MAX_PAGES,
   ttlDays: number = DEFAULT_TTL_DAYS,
+  websiteId?: string,
 ): Promise<ScrapeResult> {
   const startTime = Date.now();
   const errors: ScrapeError[] = [];
@@ -272,14 +273,22 @@ export async function executeScrapeJob(
     console.log(`[scraper] Cleaned ${cleaned} expired seen items`);
   }
 
-  // Step 2: Fetch active websites
-  const websites = await db
-    .select()
-    .from(monitoredWebsites)
-    .where(eq(monitoredWebsites.active, true));
+  // Step 2: Fetch active websites (optionally filtered to a single website)
+  let websites;
+  if (websiteId) {
+    websites = await db
+      .select()
+      .from(monitoredWebsites)
+      .where(and(eq(monitoredWebsites.active, true), eq(monitoredWebsites.id, websiteId)));
+  } else {
+    websites = await db
+      .select()
+      .from(monitoredWebsites)
+      .where(eq(monitoredWebsites.active, true));
+  }
 
   if (websites.length === 0) {
-    console.log('[scraper] No active websites configured — skipping');
+    console.log(`[scraper] No active websites found${websiteId ? ` for id ${websiteId}` : ''} — skipping`);
     return {
       totalProductsEncountered: 0,
       newDealsFound: 0,

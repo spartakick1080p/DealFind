@@ -15,6 +15,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@aws-sdk/client-scheduler": "^3.994.0",
     "@neondatabase/serverless": "^1.0.2",
     "daisyui": "^5.5.18",
     "drizzle-orm": "^0.45.1",

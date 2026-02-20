@@ -10,7 +10,11 @@ let isRunning = false;
 
 // ---------------------------------------------------------------------------
 // GET /api/cron/scrape
-// Triggered by Vercel Cron or any authenticated caller.
+// GET /api/cron/scrape?websiteId=<uuid>
+//
+// Triggered by EventBridge Scheduler (per-website) or manually.
+// When websiteId is provided, only that website is scraped.
+// When omitted, all active websites are scraped (legacy/fallback).
 // ---------------------------------------------------------------------------
 
 export async function GET(request: Request) {
@@ -33,7 +37,13 @@ export async function GET(request: Request) {
   isRunning = true;
 
   try {
-    const result = await executeScrapeJob();
+    // Extract optional websiteId from query params or header
+    const { searchParams } = new URL(request.url);
+    const websiteId = searchParams.get('websiteId')
+      ?? request.headers.get('x-website-id')
+      ?? undefined;
+
+    const result = await executeScrapeJob(undefined, undefined, undefined, websiteId);
     return NextResponse.json(result);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

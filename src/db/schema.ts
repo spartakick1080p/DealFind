@@ -17,6 +17,7 @@ export const monitoredWebsites = pgTable('monitored_websites', {
   active: boolean('active').default(true).notNull(),
   productSchema: text('product_schema'),
   authToken: text('auth_token'),
+  scrapeInterval: varchar('scrape_interval', { length: 64 }).default('0 8 * * *').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

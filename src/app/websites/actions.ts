@@ -4,6 +4,7 @@ import { eq, desc } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { db } from '@/db';
 import { monitoredWebsites } from '@/db/schema';
+import { upsertSchedule, deleteSchedule } from '@/lib/scheduler';
 
 type ActionResult<T = void> =
   | { success: true; data: T }
@@ -29,6 +30,13 @@ export async function createWebsite(
       .values({ name: trimmedName, baseUrl: trimmedUrl })
       .returning();
 
+    // Sync EventBridge schedule
+    try {
+      await upsertSchedule(website.id, website.scrapeInterval, website.active);
+    } catch {
+      // Non-fatal — schedule can be synced later
+    }
+
     revalidatePath('/websites');
     return { success: true, data: website };
   } catch (err: unknown) {
@@ -47,7 +55,7 @@ export async function createWebsite(
 
 export async function updateWebsite(
   id: string,
-  data: { name?: string; baseUrl?: string; active?: boolean }
+  data: { name?: string; baseUrl?: string; active?: boolean; scrapeInterval?: string }
 ): Promise<ActionResult<typeof monitoredWebsites.$inferSelect>> {
   if (data.name !== undefined && !data.name.trim()) {
     return { success: false, error: 'Name cannot be empty' };
@@ -63,6 +71,7 @@ export async function updateWebsite(
     if (data.name !== undefined) updateValues.name = data.name.trim();
     if (data.baseUrl !== undefined) updateValues.baseUrl = data.baseUrl.trim();
     if (data.active !== undefined) updateValues.active = data.active;
+    if (data.scrapeInterval !== undefined) updateValues.scrapeInterval = data.scrapeInterval.trim();
 
     const [website] = await db
       .update(monitoredWebsites)
@@ -72,6 +81,13 @@ export async function updateWebsite(
 
     if (!website) {
       return { success: false, error: 'Website not found' };
+    }
+
+    // Sync EventBridge schedule
+    try {
+      await upsertSchedule(website.id, website.scrapeInterval, website.active);
+    } catch {
+      // Non-fatal
     }
 
     revalidatePath('/websites');
@@ -101,6 +117,13 @@ export async function deleteWebsite(
 
     if (!deleted) {
       return { success: false, error: 'Website not found' };
+    }
+
+    // Clean up EventBridge schedule
+    try {
+      await deleteSchedule(deleted.id);
+    } catch {
+      // Non-fatal
     }
 
     revalidatePath('/websites');
