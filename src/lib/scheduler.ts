@@ -21,6 +21,7 @@ import {
   GetScheduleCommand,
   ResourceNotFoundException,
   type FlexibleTimeWindowMode,
+  type ScheduleState,
 } from '@aws-sdk/client-scheduler';
 
 // ---------------------------------------------------------------------------
@@ -85,7 +86,7 @@ export async function upsertSchedule(
   const cronSecret = process.env.CRON_SECRET ?? '';
 
   const scheduleExpression = `cron(${cronToEventBridge(cronExpression)})`;
-  const state = active ? 'ENABLED' : 'DISABLED';
+  const state = (active ? 'ENABLED' : 'DISABLED') as ScheduleState;
 
   const params = {
     Name: name,
