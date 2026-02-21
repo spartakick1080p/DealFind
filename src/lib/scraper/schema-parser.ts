@@ -27,8 +27,8 @@ export interface ProductPageSchema {
 }
 
 export interface ExtractionConfig {
-  /** 'script-json' = parse JSON from a <script> tag, 'json-ld' = parse JSON-LD, 'api-json' = fetch JSON from an API */
-  method: 'script-json' | 'json-ld' | 'meta-tags' | 'api-json';
+  /** 'script-json' = parse JSON from a <script> tag, 'json-ld' = parse JSON-LD, 'api-json' = fetch JSON from an API, 'html-dom' = extract from HTML DOM using regex selectors */
+  method: 'script-json' | 'json-ld' | 'meta-tags' | 'api-json' | 'html-dom';
   /** CSS-like selector for the script tag (e.g. 'script#__NEXT_DATA__') */
   selector?: string;
   /** For json-ld: the @type to look for (e.g. 'Product') */
@@ -45,6 +45,39 @@ export interface ExtractionConfig {
   apiHeaders?: Record<string, string>;
   /** JSON body template for POST requests. Use {variable} for substitution from the page URL. */
   apiBody?: Record<string, unknown>;
+
+  // --- html-dom specific fields ---
+  /** CSS-like selector for each product card container (e.g. 'div.product-card') */
+  itemSelector?: string;
+  /** Regex-based field extractors for html-dom method. Each key maps to a regex
+   *  with a capture group that extracts the value from within an item's HTML. */
+  htmlFields?: Record<string, string>;
+  /** Pagination config for html-dom schemas. Uses URL template with {offset} placeholder. */
+  htmlPagination?: HtmlPaginationConfig;
+
+  /**
+   * Optional CSS-like selector for a container element that wraps the product listing.
+   * When set, the HTML is narrowed to this container before chunking by itemSelector.
+   * This avoids matching product-card elements in sidebars, recommendations, etc.
+   * Example: 'div.product-list-container' or 'ul.search-results'
+   */
+  containerSelector?: string;
+
+  /**
+   * Optional login config for html-dom schemas that require an authenticated session.
+   * When present, the scraper will POST to the login URL to obtain a fresh session
+   * cookie before fetching product pages.
+   */
+  login?: {
+    /** Login endpoint URL */
+    url: string;
+    /** POST body fields. Values support ${ENV_VAR} interpolation. */
+    fields: Record<string, string>;
+    /** Name of the session cookie to capture from the login response (e.g. 'JSESSIONID') */
+    sessionCookie: string;
+    /** Cookie header name to set on subsequent requests (defaults to the sessionCookie name) */
+    cookieHeader?: string;
+  };
 
   // --- api-json pagination ---
   /** Pagination config for api-json schemas. When present, the scraper will
@@ -72,6 +105,15 @@ export interface ApiPaginationConfig {
    * When set, only the offsetParam query param is sent (limitParam is omitted).
    */
   cursorTemplate?: string;
+}
+
+export interface HtmlPaginationConfig {
+  /** URL template with {offset} placeholder, e.g. "/browse/electronics/_/N-123?No={offset}&Nrpp=32" */
+  urlTemplate: string;
+  /** Number of items per page (default: 32) */
+  pageSize?: number;
+  /** Maximum number of pages to fetch (default: 50) */
+  maxPages?: number;
 }
 
 export interface PathConfig {
@@ -150,6 +192,9 @@ function extractJsonFromHtml(
   if (config.method === 'meta-tags') {
     return extractMetaTags(html);
   }
+  if (config.method === 'html-dom') {
+    return extractHtmlDom(html, config);
+  }
   return null;
 }
 
@@ -227,7 +272,224 @@ function extractMetaTags(html: string): Record<string, any> {
   return Object.keys(result).length > 0 ? result : null as unknown as Record<string, string>;
 }
 
-function escapeRegex(str: string): string {
+/**
+ * Extract product data from HTML DOM using regex-based selectors.
+ * Returns a synthetic JSON object with a `products` array that can be
+ * processed by the standard extractFromData pipeline.
+ *
+ * The `itemSelector` splits the HTML into per-product chunks, then
+ * `htmlFields` regexes extract field values from each chunk.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractHtmlDom(html: string, config: ExtractionConfig): any | null {
+  const itemSelector = config.itemSelector;
+  if (!itemSelector || !config.htmlFields) return null;
+
+  // Optionally narrow the HTML to a container element before chunking.
+  // This avoids matching itemSelector elements in sidebars, recommendations, etc.
+  let searchHtml = html;
+  if (config.containerSelector) {
+    const container = parseItemSelector(config.containerSelector);
+    let containerRegex: RegExp;
+    if (container.id) {
+      const escapedId = escapeRegex(container.id);
+      containerRegex = new RegExp(
+        `<${container.tagName}[^>]*id=["']${escapedId}["'][^>]*>`,
+        'gi'
+      );
+    } else {
+      const escapedCClass = escapeRegex(container.className);
+      containerRegex = new RegExp(
+        `<${container.tagName}[^>]*class=["'][^"']*\\b${escapedCClass}\\b[^"']*["'][^>]*>`,
+        'gi'
+      );
+    }
+    const containerMatch = containerRegex.exec(html);
+    if (containerMatch) {
+      // Find the matching closing tag by counting nesting depth
+      const cTag = container.tagName;
+      const startIdx = containerMatch.index;
+      let depth = 1;
+      const openRegex = new RegExp(`<${cTag}[\\s>]`, 'gi');
+      const closeRegex = new RegExp(`</${cTag}>`, 'gi');
+      openRegex.lastIndex = startIdx + containerMatch[0].length;
+      closeRegex.lastIndex = startIdx + containerMatch[0].length;
+
+      let endIdx = html.length;
+      let searchPos = startIdx + containerMatch[0].length;
+
+      while (depth > 0 && searchPos < html.length) {
+        openRegex.lastIndex = searchPos;
+        closeRegex.lastIndex = searchPos;
+        const nextOpen = openRegex.exec(html);
+        const nextClose = closeRegex.exec(html);
+
+        if (!nextClose) break; // no more closing tags
+
+        if (nextOpen && nextOpen.index < nextClose.index) {
+          depth++;
+          searchPos = nextOpen.index + nextOpen[0].length;
+        } else {
+          depth--;
+          if (depth === 0) {
+            endIdx = nextClose.index + nextClose[0].length;
+          }
+          searchPos = nextClose.index + nextClose[0].length;
+        }
+      }
+
+      searchHtml = html.slice(startIdx, endIdx);
+      console.log(
+        `[schema-parser] containerSelector "${config.containerSelector}" narrowed HTML from ${html.length} to ${searchHtml.length} chars`,
+      );
+    } else {
+      console.warn(
+        `[schema-parser] containerSelector "${config.containerSelector}" not found in HTML — using full page`,
+      );
+    }
+  }
+
+  // Split HTML into product card chunks using the item selector as a delimiter.
+  // We look for the opening tag that matches the selector pattern.
+  // e.g. 'div.product-card' → <div class="...product-card...">
+  const { tagName, className } = parseItemSelector(itemSelector);
+
+  // Support both double-quoted and single-quoted class attributes
+  const escapedClass = escapeRegex(className);
+  const chunkRegex = new RegExp(
+    `<${tagName}[^>]*class=["'][^"']*\\b${escapedClass}\\b[^"']*["'][^>]*>`,
+    'gi'
+  );
+
+  // Find all opening tag positions and their full match length
+  const matchPositions: { index: number; length: number }[] = [];
+  let m;
+  while ((m = chunkRegex.exec(searchHtml)) !== null) {
+    matchPositions.push({ index: m.index, length: m[0].length });
+  }
+
+  if (matchPositions.length === 0) {
+    // Debug: log a snippet of the HTML around the first occurrence of the class name
+    // to help diagnose selector mismatches
+    const classIdx = searchHtml.indexOf(className);
+    if (classIdx >= 0) {
+      const snippet = searchHtml.slice(Math.max(0, classIdx - 100), classIdx + 200).replace(/\n/g, ' ');
+      console.warn(
+        `[schema-parser] itemSelector "${itemSelector}" matched 0 elements via regex, ` +
+        `but class name "${className}" found in HTML at index ${classIdx}. Snippet: ...${snippet}...`,
+      );
+    } else {
+      console.warn(
+        `[schema-parser] itemSelector "${itemSelector}" matched 0 elements — ` +
+        `class name "${className}" not found anywhere in the HTML (${searchHtml.length} chars)`,
+      );
+    }
+    return null;
+  }
+
+  // Extract each product chunk using proper tag-depth matching.
+  // Instead of slicing from one match to the next (which creates tiny misaligned
+  // chunks when there are many matches from sidebars/recommendations), we find
+  // the closing tag for each matched element so the chunk contains the full element.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const products: any[] = [];
+  const openTagRegex = new RegExp(`<${tagName}[\\s>/]`, 'gi');
+  const closeTagRegex = new RegExp(`</${tagName}\\s*>`, 'gi');
+
+  for (const pos of matchPositions) {
+    // Find the closing tag by tracking nesting depth
+    let depth = 1;
+    let searchPos = pos.index + pos.length;
+    let endIdx = searchHtml.length;
+
+    while (depth > 0 && searchPos < searchHtml.length) {
+      openTagRegex.lastIndex = searchPos;
+      closeTagRegex.lastIndex = searchPos;
+      const nextOpen = openTagRegex.exec(searchHtml);
+      const nextClose = closeTagRegex.exec(searchHtml);
+
+      if (!nextClose) break;
+
+      if (nextOpen && nextOpen.index < nextClose.index) {
+        depth++;
+        searchPos = nextOpen.index + nextOpen[0].length;
+      } else {
+        depth--;
+        if (depth === 0) {
+          endIdx = nextClose.index + nextClose[0].length;
+        }
+        searchPos = nextClose.index + nextClose[0].length;
+      }
+    }
+
+    const chunk = searchHtml.slice(pos.index, endIdx);
+
+    // Debug: log first chunk size on first invocation per page
+    if (products.length === 0 && pos === matchPositions[0]) {
+      console.log(`[schema-parser] First "${itemSelector}" chunk: ${chunk.length} chars (depth-matched)`);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const product: Record<string, any> = {};
+    for (const [field, pattern] of Object.entries(config.htmlFields)) {
+      const fieldRegex = new RegExp(pattern, 'i');
+      const fieldMatch = fieldRegex.exec(chunk);
+      if (fieldMatch?.[1]) {
+        // Decode HTML entities and trim
+        product[field] = decodeHtmlEntities(fieldMatch[1].trim());
+      }
+    }
+
+    // Only include products that have at least a productId
+    if (product.productId) {
+      products.push(product);
+    }
+  }
+
+  if (products.length === 0 && matchPositions.length > 0) {
+    const pidPattern = config.htmlFields.productId ?? '(none)';
+    console.warn(
+      `[schema-parser] Found ${matchPositions.length} "${itemSelector}" elements but 0 had a valid productId. ` +
+      `productId regex: ${pidPattern}`,
+    );
+  }
+
+  return { products };
+}
+
+/** Parse a simple CSS selector like 'div.product-card' or 'div#product-list' into tag + class/id */
+export function parseItemSelector(selector: string): { tagName: string; className: string; id?: string } {
+  const hashIndex = selector.indexOf('#');
+  if (hashIndex !== -1) {
+    return {
+      tagName: selector.slice(0, hashIndex) || 'div',
+      className: '',
+      id: selector.slice(hashIndex + 1),
+    };
+  }
+  const dotIndex = selector.indexOf('.');
+  if (dotIndex === -1) return { tagName: selector, className: '' };
+  return {
+    tagName: selector.slice(0, dotIndex) || 'div',
+    className: selector.slice(dotIndex + 1),
+  };
+}
+
+/** Decode common HTML entities */
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&#47;/g, '/')
+    .replace(/&nbsp;/g, ' ');
+}
+
+
+export function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
@@ -352,6 +614,9 @@ export function parseWithSchema(
     return { variants: [], pageType: 'unknown' };
   }
 
+  // For html-dom, the extracted data has a flat `products` array where
+  // field names match the htmlFields keys directly. Map them through
+  // paths.fields which should use the same keys.
   return extractFromData(data, schema.paths);
 }
 
@@ -452,6 +717,23 @@ function extractVariantsFromProduct(
     if (listPrice == null && fields.msrp) {
       listPrice = normalisePrice(resolvePath(merged, fields.msrp));
     }
+    // Fallback: if listPrice is still missing, try activePrice or salePrice.
+    // This handles products where the only available price is the current
+    // selling price (e.g. non-sale items that don't show a strikethrough price).
+    // Ignore placeholder prices under $0.50 (e.g. $0.01 in some retail systems).
+    if (listPrice == null || listPrice <= 0) {
+      const fallbackActive = fields.activePrice
+        ? normalisePrice(resolvePath(merged, fields.activePrice))
+        : null;
+      const fallbackSale = fields.salePrice
+        ? normalisePrice(resolvePath(merged, fields.salePrice))
+        : null;
+      if (fallbackActive != null && fallbackActive > 0) {
+        listPrice = fallbackActive;
+      } else if (fallbackSale != null && fallbackSale > 0) {
+        listPrice = fallbackSale;
+      }
+    }
     if (listPrice == null || listPrice <= 0) continue;
 
     // If msrp is mapped and higher than listPrice, use it as the reference price
@@ -477,10 +759,14 @@ function extractVariantsFromProduct(
       ? normalisePrice(resolvePath(merged, fields.salePrice))
       : null;
 
-    const best = pickBestPrice(activePrice, salePrice);
-    // If no candidate prices at all, skip this variant (no discount can be computed)
-    if (best == null) continue;
-    const bestPrice = best < referencePrice ? best : listPrice;
+    const effectiveSalePrice = salePrice;
+
+    const best = pickBestPrice(activePrice, effectiveSalePrice);
+    // If no candidate prices, fall back to listPrice (0% discount) instead of
+    // skipping — this keeps the variant visible for filters that don't require
+    // a discount and avoids silently dropping products on pages where the site
+    // doesn't render sale-price elements.
+    const bestPrice = best != null && best < referencePrice ? best : listPrice;
     const discountPercentage = computeDiscount(referencePrice, bestPrice);
 
     const productId = String(resolvePath(merged, fields.productId) ?? 'unknown');
@@ -498,7 +784,7 @@ function extractVariantsFromProduct(
       console.log(
         `[schema-parser] Sample variant: productId="${productId}", skuId="${skuId}", ` +
         `name="${displayName}", listPrice=${listPrice}${msrpNote}, ` +
-        `activePrice=${activePrice}, salePrice=${salePrice}, ` +
+        `activePrice=${activePrice}, salePrice=${effectiveSalePrice}, ` +
         `bestPrice=${bestPrice}, discount=${discountPercentage}%`,
       );
     }
@@ -543,7 +829,7 @@ function extractVariantsFromProduct(
       brand,
       listPrice: referencePrice,
       activePrice,
-      salePrice,
+      salePrice: effectiveSalePrice,
       bestPrice,
       discountPercentage,
       imageUrl,
@@ -586,13 +872,23 @@ export function parseSchemaJson(
     return { valid: false, error: 'Missing "extraction" object' };
   }
   const ext = obj.extraction as Record<string, unknown>;
-  if (!['script-json', 'json-ld', 'meta-tags', 'api-json'].includes(ext.method as string)) {
-    return { valid: false, error: 'extraction.method must be "script-json", "json-ld", "meta-tags", or "api-json"' };
+  if (!['script-json', 'json-ld', 'meta-tags', 'api-json', 'html-dom'].includes(ext.method as string)) {
+    return { valid: false, error: 'extraction.method must be "script-json", "json-ld", "meta-tags", "api-json", or "html-dom"' };
   }
 
   // api-json requires an apiUrl
   if (ext.method === 'api-json' && typeof ext.apiUrl !== 'string') {
     return { valid: false, error: 'extraction.apiUrl is required for api-json method' };
+  }
+
+  // html-dom requires an itemSelector and htmlFields
+  if (ext.method === 'html-dom') {
+    if (typeof ext.itemSelector !== 'string') {
+      return { valid: false, error: 'extraction.itemSelector is required for html-dom method' };
+    }
+    if (!ext.htmlFields || typeof ext.htmlFields !== 'object') {
+      return { valid: false, error: 'extraction.htmlFields is required for html-dom method' };
+    }
   }
 
   // Validate paths

@@ -68,7 +68,7 @@ export default function SchemaEditor({ websiteId, initialSchema }: SchemaEditorP
 
         <p className="text-sm text-base-content/60">
           Define how to extract product data from this website. Supports HTML parsing
-          (script-json, json-ld, meta-tags) and direct API calls (api-json) for client-rendered sites.
+          (script-json, json-ld, meta-tags, html-dom) and direct API calls (api-json) for client-rendered sites.
         </p>
 
         <div className="relative">

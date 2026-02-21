@@ -1,10 +1,5 @@
-import { triggerScrape } from './actions';
-import ScrapeTriggerButton from '@/components/scrape-trigger-button';
-
-async function handleTrigger() {
-  'use server';
-  return triggerScrape();
-}
+import { getActiveWebsites, getActiveFilters } from './actions';
+import TargetedScrapeForm from '@/components/targeted-scrape-form';
 
 const CONFIG_ITEMS = [
   {
@@ -69,7 +64,12 @@ const CONFIG_ITEMS = [
   },
 ];
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const [websites, activeFilters] = await Promise.all([
+    getActiveWebsites(),
+    getActiveFilters(),
+  ]);
+
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold">Settings</h1>
@@ -101,10 +101,9 @@ export default function SettingsPage() {
         <div className="card bg-base-300 shadow-lg">
           <div className="card-body p-5">
             <p className="text-sm text-base-content/60 mb-3">
-              Trigger a scrape job immediately, bypassing the cron schedule. All active websites and
-              their product URLs will be processed.
+              Trigger a scrape job immediately. Optionally target a specific website and/or filter.
             </p>
-            <ScrapeTriggerButton onTrigger={handleTrigger} />
+            <TargetedScrapeForm websites={websites} filters={activeFilters} />
           </div>
         </div>
       </section>

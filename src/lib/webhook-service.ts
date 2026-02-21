@@ -18,6 +18,11 @@ export interface DealPayload {
   discountPercentage: string;
   imageUrl: string | null;
   productUrl: string;
+  websiteName?: string;
+  /** Price verification result for high-discount deals */
+  priceVerification?: 'verified' | 'mismatch' | 'unverified';
+  /** The price found on the product detail page (if verified) */
+  pdpPrice?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,17 +97,28 @@ async function sendDiscord(channelUrl: string, deals: DealPayload[], botToken?: 
     await new Promise((r) => setTimeout(r, DELAY_MS));
 
     const batch = capped.slice(i, i + BATCH_SIZE);
-    const embeds = batch.map((deal) => ({
-      title: deal.productName,
-      url: deal.productUrl || undefined,
-      color: 0x00c853,
-      fields: [
-        { name: 'Price', value: `~~$${deal.listPrice}~~ → **$${deal.bestPrice}**`, inline: true },
-        { name: 'Discount', value: `${deal.discountPercentage}% off`, inline: true },
-        ...(deal.brand ? [{ name: 'Brand', value: deal.brand, inline: true }] : []),
-      ],
-      thumbnail: deal.imageUrl ? { url: deal.imageUrl } : undefined,
-    }));
+    const embeds = batch.map((deal) => {
+      const verificationField = deal.priceVerification === 'verified'
+        ? { name: 'Price Check', value: '✅ Verified on product page', inline: true }
+        : deal.priceVerification === 'mismatch'
+        ? { name: '⚠️ Price Mismatch', value: `PDP shows ${deal.pdpPrice ?? 'N/A'}`, inline: true }
+        : null;
+
+      return {
+        title: deal.productName,
+        url: deal.productUrl || undefined,
+        color: deal.priceVerification === 'mismatch' ? 0xff9800 : 0x00c853,
+        fields: [
+          { name: 'Price', value: `~~${deal.listPrice}~~ → **${deal.bestPrice}**`, inline: true },
+          { name: 'Discount', value: `${deal.discountPercentage}% off`, inline: true },
+          ...(deal.brand ? [{ name: 'Brand', value: deal.brand, inline: true }] : []),
+          ...(deal.websiteName ? [{ name: 'Source', value: deal.websiteName, inline: true }] : []),
+          ...(verificationField ? [verificationField] : []),
+        ],
+        thumbnail: deal.imageUrl ? { url: deal.imageUrl } : undefined,
+        timestamp: new Date().toISOString(),
+      };
+    });
 
     await post({ embeds });
   }
@@ -118,7 +134,7 @@ async function sendSlack(webhookUrl: string, deals: DealPayload[]): Promise<void
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*<${deal.productUrl}|${deal.productName}>*\n~$${deal.listPrice}~ → *$${deal.bestPrice}* (${deal.discountPercentage}% off)${deal.brand ? ` · ${deal.brand}` : ''}`,
+        text: `*<${deal.productUrl}|${deal.productName}>*\n~${deal.listPrice}~ → *${deal.bestPrice}* (${deal.discountPercentage}% off)${deal.brand ? ` · ${deal.brand}` : ''}`,
       },
       ...(deal.imageUrl ? { accessory: { type: 'image', image_url: deal.imageUrl, alt_text: deal.productName } } : {}),
     })),

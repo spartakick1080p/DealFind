@@ -11,7 +11,7 @@ import { db } from '@/db';
 import { deals, filters, monitoredWebsites, productPageUrls } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 
-import { fetchWithRetry, fetchApiJson, type HttpClientConfig } from './http-client';
+import { fetchWithRetry, fetchApiJson, interpolateEnvVars, type HttpClientConfig } from './http-client';
 import {
   parseNextData,
   extractProductVariants,
@@ -19,7 +19,7 @@ import {
   getPageCount,
   type ProductVariant,
 } from './parser';
-import { parseWithSchema, parseFromApiData, parseSchemaJson, resetDebugSampleCount, type ProductPageSchema, type ApiPaginationConfig } from './schema-parser';
+import { parseWithSchema, parseFromApiData, parseSchemaJson, resetDebugSampleCount, parseItemSelector, escapeRegex, type ProductPageSchema, type ApiPaginationConfig } from './schema-parser';
 import { findMatchingFilters, type FilterCriteria } from '@/lib/filter-engine';
 import { isNewDeal, markAsSeen, cleanExpiredItems } from '@/lib/seen-tracker';
 import { createNotification } from '@/lib/notification-service';
@@ -146,6 +146,7 @@ async function processUrl(
   baseUrl?: string,
   webhookDeals?: DealPayload[],
   onBatchReady?: () => Promise<void>,
+  websiteName?: string,
 ): Promise<void> {
   // If a custom schema is provided, use the schema-driven parser
   if (customSchema) {
@@ -169,7 +170,7 @@ async function processUrl(
         // Paginated API fetching
         await fetchApiWithPagination(
           customSchema, mergedParams, pagination, authToken,
-          url, maxPages, activeFilters, ttlDays, result, errors, pageProgress, seenIds, baseUrl, webhookDeals, onBatchReady,
+          url, maxPages, activeFilters, ttlDays, result, errors, pageProgress, seenIds, baseUrl, webhookDeals, onBatchReady, websiteName,
         );
       } else {
         // Single-page API fetch (no pagination)
@@ -195,7 +196,7 @@ async function processUrl(
             if (seenIds.has(variant.productId)) continue;
             seenIds.add(variant.productId);
           }
-          await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady);
+          await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName);
         }
         pageProgress.completed += 1;
         updateProgress({ currentPage: pageProgress.completed, totalPages: pageProgress.total, totalProducts: result.totalProducts, newDeals: result.newDeals, uniqueProducts: getUniqueProductCount() });
@@ -205,25 +206,248 @@ async function processUrl(
   }
 
   // Fetch the page HTML (needed for HTML-based schemas and default parser)
+  // Build custom headers for html-dom schemas (e.g. Cookie for session auth)
+  let fetchHeaders: Record<string, string> | undefined;
+  if (customSchema?.extraction.apiHeaders) {
+    fetchHeaders = {};
+    for (const [key, value] of Object.entries(customSchema.extraction.apiHeaders)) {
+      fetchHeaders[key] = interpolateEnvVars(value, authToken);
+    }
+    // Debug: log header keys (not values, to avoid leaking secrets)
+    const headerKeys = Object.keys(fetchHeaders);
+    const cookiePreview = fetchHeaders['Cookie']
+      ? `Cookie=${fetchHeaders['Cookie'].slice(0, 30)}...`
+      : 'no Cookie';
+    console.log(
+      `[scraper] html-dom headers: [${headerKeys.join(', ')}], ${cookiePreview}, ` +
+      `authToken ${authToken ? 'present (' + authToken.length + ' chars)' : 'MISSING'}`,
+    );
+  }
+
   pageProgress.total += 1;
-  const response = await fetchWithRetry(url, httpConfig);
+  const response = await fetchWithRetry(url, httpConfig, fetchHeaders ? { headers: fetchHeaders } : undefined);
   if (!response) {
     errors.push({ url, message: 'Failed to fetch (retries exhausted or unreachable)' });
     return;
   }
-  const html = await response.text();
+  let html = await response.text();
+
+  // Debug: check if auth-gated content (like prices) is present in the fetched HTML
+  if (customSchema?.extraction.method === 'html-dom') {
+    const hasFinalPriceValues = /finalPrice_\d+" value="[\d.]+"/i.test(html);
+    const salePriceCount = (html.match(/product-card_price_sale/g) || []).length;
+    console.log(
+      `[scraper] html-dom fetch debug: ${html.length} chars, ` +
+      `finalPrice values populated: ${hasFinalPriceValues}, ` +
+      `sale price elements: ${salePriceCount}`,
+    );
+
+    // If no prices found and a login config exists, attempt to log in and retry
+    if (!hasFinalPriceValues && salePriceCount === 0 && customSchema.extraction.login) {
+      const loginConfig = customSchema.extraction.login;
+      console.log(`[scraper] Attempting login via ${loginConfig.url} to refresh session...`);
+
+      try {
+        // Build login form body with env var interpolation
+        const loginBody = new URLSearchParams();
+        for (const [key, value] of Object.entries(loginConfig.fields)) {
+          loginBody.set(key, interpolateEnvVars(value, authToken));
+        }
+
+        // First, GET the login page to obtain a fresh session cookie + _dynSessConf
+        const preLoginRes = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'User-Agent': fetchHeaders?.['User-Agent'] ?? 'Mozilla/5.0',
+          },
+          redirect: 'manual',
+        });
+
+        // Capture the fresh session cookie from the pre-login response
+        let freshSessionCookie = '';
+        const setCookies = preLoginRes.headers.getSetCookie?.() ?? [];
+        for (const sc of setCookies) {
+          if (sc.startsWith(loginConfig.sessionCookie + '=')) {
+            freshSessionCookie = sc.split(';')[0].split('=').slice(1).join('=');
+            break;
+          }
+        }
+
+        if (!freshSessionCookie) {
+          // Fallback: parse from raw header
+          const rawSetCookie = preLoginRes.headers.get('set-cookie') ?? '';
+          const cookieMatch = new RegExp(`${loginConfig.sessionCookie}=([^;]+)`).exec(rawSetCookie);
+          if (cookieMatch) freshSessionCookie = cookieMatch[1];
+        }
+
+        if (!freshSessionCookie) {
+          console.warn('[scraper] Could not obtain fresh session cookie from pre-login request');
+        } else {
+          console.log(`[scraper] Got fresh ${loginConfig.sessionCookie} (${freshSessionCookie.length} chars)`);
+
+          // POST login with the fresh session cookie
+          const loginRes = await fetch(loginConfig.url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Cookie': `${loginConfig.sessionCookie}=${freshSessionCookie}`,
+              'User-Agent': fetchHeaders?.['User-Agent'] ?? 'Mozilla/5.0',
+            },
+            body: loginBody.toString(),
+            redirect: 'manual',
+          });
+
+          // Check if login succeeded (usually a 302 redirect)
+          console.log(`[scraper] Login response: ${loginRes.status}`);
+
+          // The session cookie may have been rotated — capture the new one
+          const postLoginCookies = loginRes.headers.getSetCookie?.() ?? [];
+          for (const sc of postLoginCookies) {
+            if (sc.startsWith(loginConfig.sessionCookie + '=')) {
+              freshSessionCookie = sc.split(';')[0].split('=').slice(1).join('=');
+              break;
+            }
+          }
+
+          // Update fetchHeaders with the authenticated session cookie
+          const cookieName = loginConfig.cookieHeader ?? loginConfig.sessionCookie;
+          if (fetchHeaders) {
+            fetchHeaders['Cookie'] = `${cookieName}=${freshSessionCookie}`;
+          }
+
+          // Retry the original page fetch with the authenticated session
+          console.log(`[scraper] Retrying page fetch with authenticated session...`);
+          const retryResponse = await fetchWithRetry(url, httpConfig, fetchHeaders ? { headers: fetchHeaders } : undefined);
+          if (retryResponse) {
+            html = await retryResponse.text();
+            const retryHasPrices = /finalPrice_\d+" value="[\d.]+"/i.test(html);
+            const retrySaleCount = (html.match(/product-card_price_sale/g) || []).length;
+            console.log(
+              `[scraper] Post-login fetch: ${html.length} chars, ` +
+              `finalPrice populated: ${retryHasPrices}, sale prices: ${retrySaleCount}`,
+            );
+            if (!retryHasPrices && retrySaleCount === 0) {
+              console.warn('[scraper] ⚠ Login did not resolve missing prices — credentials may be invalid');
+              errors.push({ url, message: 'Session expired and auto-login failed to restore prices. Check login credentials.' });
+            }
+          }
+        }
+      } catch (loginErr) {
+        const msg = loginErr instanceof Error ? loginErr.message : String(loginErr);
+        console.error(`[scraper] Login attempt failed: ${msg}`);
+      }
+    } else if (!hasFinalPriceValues && salePriceCount === 0) {
+      console.warn(
+        `[scraper] ⚠ No price data found in HTML — the session cookie may be expired or invalid. ` +
+        `Check that the auth token for this website is current.`,
+      );
+    }
+  }
 
   if (customSchema) {
-    // HTML-based custom schema
+    // HTML-based custom schema — parse first page
+    let allVariants: ProductVariant[] = [];
     const { variants } = parseWithSchema(html, customSchema);
-    result.totalProducts += variants.length;
-    const bestVariants = pickBestVariantPerProduct(variants);
+    allVariants.push(...variants);
+
+    // html-dom pagination: fetch additional pages if configured
+    if (customSchema.extraction.method === 'html-dom' && customSchema.extraction.htmlPagination) {
+      const htmlPag = customSchema.extraction.htmlPagination;
+      const pageSize = htmlPag.pageSize ?? 32;
+      const htmlMaxPages = Math.min(htmlPag.maxPages ?? 50, maxPages);
+
+      console.log(
+        `[scraper] html-dom pagination: starting with ${allVariants.length} variants from page 1, ` +
+        `pageSize=${pageSize}, maxPages=${htmlMaxPages}, urlTemplate=${htmlPag.urlTemplate.slice(0, 120)}`,
+      );
+
+      let consecutiveEmpty = 0;
+
+      // We already have page 1 (offset 0). Fetch remaining pages.
+      for (let page = 1; page < htmlMaxPages; page++) {
+        if (isCancelled()) break;
+        const offset = page * pageSize;
+        const pagedUrl = htmlPag.urlTemplate.replace('{offset}', String(offset));
+        const fullPagedUrl = pagedUrl.startsWith('http') ? pagedUrl : `${baseUrl ?? ''}${pagedUrl}`;
+
+        console.log(`[scraper] html-dom pagination: fetching page ${page + 1} — ${fullPagedUrl}`);
+
+        pageProgress.total += 1;
+        const pageResponse = await fetchWithRetry(fullPagedUrl, httpConfig, fetchHeaders ? { headers: fetchHeaders } : undefined);
+        if (!pageResponse) {
+          errors.push({ url: fullPagedUrl, message: 'Failed to fetch html-dom pagination page' });
+          pageProgress.completed += 1;
+          console.warn(`[scraper] html-dom pagination: page ${page + 1} fetch FAILED (retries exhausted)`);
+          continue;
+        }
+
+        // Log response status and check for redirects
+        console.log(`[scraper] html-dom pagination: page ${page + 1} response status=${pageResponse.status}, url=${pageResponse.url}`);
+
+        const pageHtml = await pageResponse.text();
+
+        // Debug: log HTML size and key content indicators
+        const itemSelector = customSchema.extraction.itemSelector ?? '';
+        const { className: itemClass } = parseItemSelector(itemSelector);
+        const itemMatches = itemClass ? (pageHtml.match(new RegExp(escapeRegex(itemClass), 'g')) || []).length : 0;
+        const hasSalePrices = (pageHtml.match(/product-card_price_sale/g) || []).length;
+        const hasFinalPrices = /finalPrice_\d+" value="[\d.]+"/i.test(pageHtml);
+        const isErrorPage = /<title[^>]*>\s*(error|404|not found|access denied)/i.test(pageHtml);
+
+        console.log(
+          `[scraper] html-dom pagination: page ${page + 1} debug — ` +
+          `htmlSize=${pageHtml.length}, itemClass="${itemClass}" occurrences=${itemMatches}, ` +
+          `salePriceElements=${hasSalePrices}, finalPricePopulated=${hasFinalPrices}, ` +
+          `looksLikeErrorPage=${isErrorPage}`,
+        );
+
+        const { variants: pageVariants } = parseWithSchema(pageHtml, customSchema);
+
+        console.log(`[scraper] html-dom pagination: page ${page + 1} parsed ${pageVariants.length} variants`);
+
+        // Stop if we get an empty page (no more products)
+        if (pageVariants.length === 0) {
+          consecutiveEmpty++;
+          pageProgress.completed += 1;
+
+          // Log a snippet of the HTML to help diagnose why 0 products were found
+          if (pageHtml.length < 5000) {
+            console.warn(`[scraper] html-dom pagination: page ${page + 1} returned 0 products — HTML is very small (${pageHtml.length} chars), likely an error/redirect page`);
+          } else {
+            // Check if the page has product cards but they just lack valid productIds
+            console.warn(
+              `[scraper] html-dom pagination: page ${page + 1} returned 0 products — ` +
+              `HTML has ${pageHtml.length} chars with ${itemMatches} "${itemClass}" occurrences. ` +
+              `${consecutiveEmpty} consecutive empty page(s).`,
+            );
+          }
+
+          if (consecutiveEmpty >= 2) {
+            console.log(`[scraper] html-dom pagination: ${consecutiveEmpty} consecutive empty pages — stopping`);
+            break;
+          }
+          // Try one more page before giving up (the site might skip a page)
+          continue;
+        }
+
+        consecutiveEmpty = 0;
+        allVariants.push(...pageVariants);
+        pageProgress.completed += 1;
+        updateProgress({ currentPage: pageProgress.completed, totalPages: pageProgress.total, totalProducts: result.totalProducts + allVariants.length, newDeals: result.newDeals, uniqueProducts: getUniqueProductCount() });
+      }
+
+      console.log(`[scraper] html-dom pagination complete: ${allVariants.length} total variants across all pages`);
+    }
+
+    result.totalProducts += allVariants.length;
+    const bestVariants = pickBestVariantPerProduct(allVariants);
     for (const variant of bestVariants) {
       if (seenIds) {
         if (seenIds.has(variant.productId)) continue;
         seenIds.add(variant.productId);
       }
-      await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady);
+      await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName,
+        fetchHeaders ? { httpConfig, fetchHeaders } : undefined);
     }
     pageProgress.completed += 1;
     updateProgress({ currentPage: pageProgress.completed, totalPages: pageProgress.total, totalProducts: result.totalProducts, newDeals: result.newDeals, uniqueProducts: getUniqueProductCount() });
@@ -280,7 +504,7 @@ async function processUrl(
       if (seenIds.has(variant.productId)) continue;
       seenIds.add(variant.productId);
     }
-    await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady);
+    await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName);
   }
 
   pageProgress.completed += 1;
@@ -383,6 +607,7 @@ async function fetchApiWithPagination(
   baseUrl?: string,
   webhookDeals?: DealPayload[],
   onBatchReady?: () => Promise<void>,
+  websiteName?: string,
 ): Promise<void> {
   const pageSize = pagination.pageSize ?? 120;
   const totalPath = pagination.totalPath ?? 'total';
@@ -409,8 +634,29 @@ async function fetchApiWithPagination(
 
   let totalItems = 0;
   const resolvedTotal = resolveDotPath(firstResult.data, totalPath);
+
+  // Process first page results early so we can use the count for validation
+  const firstVariants = parseFromApiData(firstResult.data, schema);
+
+  console.log(
+    `[scraper] totalPath="${totalPath}" resolved to ${JSON.stringify(resolvedTotal)} ` +
+    `(type: ${typeof resolvedTotal}), first page variants: ${firstVariants.variants.length}, pageSize: ${pageSize}`,
+  );
+
   if (typeof resolvedTotal === 'number' && resolvedTotal > 0) {
-    totalItems = resolvedTotal;
+    // Sanity check: if the "total" is <= the number of items on the first page,
+    // it's almost certainly a per-page count rather than the grand total.
+    // In that case, fall through to the unknown-total sequential pagination.
+    if (resolvedTotal <= firstVariants.variants.length && firstVariants.variants.length >= pageSize) {
+      console.warn(
+        `[scraper] totalPath "${totalPath}" resolved to ${resolvedTotal} but first page already has ` +
+        `${firstVariants.variants.length} items (pageSize=${pageSize}). This looks like a per-page count, ` +
+        `not the grand total. Will paginate until an empty page is returned.`,
+      );
+      // leave totalItems = 0 to trigger sequential pagination
+    } else {
+      totalItems = resolvedTotal;
+    }
   } else {
     console.warn(
       `[scraper] Could not resolve total from path "${totalPath}" — got ${JSON.stringify(resolvedTotal)}. ` +
@@ -429,9 +675,6 @@ async function fetchApiWithPagination(
     newDeals: result.newDeals,
     uniqueProducts: getUniqueProductCount(),
   });
-
-  // Process first page results
-  const firstVariants = parseFromApiData(firstResult.data, schema);
   result.totalProducts += firstVariants.variants.length;
 
   // Debug: log discount distribution from first page
@@ -454,7 +697,7 @@ async function fetchApiWithPagination(
       if (seenIds.has(variant.productId)) continue;
       seenIds.add(variant.productId);
     }
-    await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady);
+    await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName);
   }
 
   // --- Determine pagination strategy ---
@@ -532,7 +775,7 @@ async function fetchApiWithPagination(
             if (seenIds.has(variant.productId)) continue;
             seenIds.add(variant.productId);
           }
-          await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady);
+          await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName);
         }
         batchNewDeals += result.newDeals - dealsBefore;
       }
@@ -565,7 +808,8 @@ async function fetchApiWithPagination(
 
     console.log(
       `[scraper] API pagination complete: ${totalPages - failedPages}/${totalPages} pages fetched for ${url}` +
-      (failedPages > 0 ? ` (${failedPages} failed)` : ''),
+      (failedPages > 0 ? ` (${failedPages} failed)` : '') +
+      ` | totalItems reported by API: ${totalItems}, actual products scraped so far: ${result.totalProducts}`,
     );
   } else {
     // --- Unknown total: paginate sequentially until empty ---
@@ -603,7 +847,7 @@ async function fetchApiWithPagination(
           if (seenIds.has(variant.productId)) continue;
           seenIds.add(variant.productId);
         }
-        await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady);
+        await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName);
       }
 
       pagesCompleted++;
@@ -659,6 +903,9 @@ let _debugFilterMissCount = 0;
 /** Number of webhook deals to accumulate before flushing mid-scrape */
 const WEBHOOK_BATCH_SIZE = 10;
 
+/** Threshold above which we verify the price on the product detail page */
+const VERIFY_DISCOUNT_THRESHOLD = 90;
+
 async function evaluateAndPersist(
   variant: ProductVariant,
   activeFilters: FilterWithId[],
@@ -667,6 +914,8 @@ async function evaluateAndPersist(
   baseUrl?: string,
   webhookDeals?: DealPayload[],
   onBatchReady?: () => Promise<void>,
+  websiteName?: string,
+  verifyOptions?: { httpConfig: HttpClientConfig; fetchHeaders?: Record<string, string> },
 ): Promise<void> {
   const matchingFilters = findMatchingFilters(variant, activeFilters);
   if (matchingFilters.length === 0) {
@@ -692,6 +941,69 @@ async function evaluateAndPersist(
     `bestPrice=$${variant.bestPrice}, filter=${matchedFilter.id}`,
   );
 
+  // --- Price verification on product detail page for extreme discounts ---
+  let priceVerification: 'verified' | 'mismatch' | 'unverified' = 'unverified';
+  let pdpPrice: number | undefined;
+
+  const fullProductUrl = resolveFullUrl(variant.productUrl, baseUrl);
+  if (
+    variant.discountPercentage >= VERIFY_DISCOUNT_THRESHOLD &&
+    fullProductUrl.startsWith('http') &&
+    verifyOptions
+  ) {
+    try {
+      console.log(
+        `[scraper] 🔍 Verifying price for "${variant.displayName}" ` +
+        `(${variant.discountPercentage}% off, $${variant.bestPrice}) — ${fullProductUrl}`,
+      );
+      const pdpResponse = await fetchWithRetry(
+        fullProductUrl,
+        verifyOptions.httpConfig,
+        verifyOptions.fetchHeaders ? { headers: verifyOptions.fetchHeaders } : undefined,
+      );
+      if (pdpResponse) {
+        const pdpHtml = await pdpResponse.text();
+
+        // Strategy 1: hidden input with finalPrice (NEX-specific)
+        const finalPriceMatch = /finalPrice[^"]*"\s*value="([\d.]+)"/i.exec(pdpHtml);
+        // Strategy 2: meta tag product:price:amount
+        const metaPriceMatch = /property="product:price:amount"\s*content="([\d.]+)"/i.exec(pdpHtml)
+          ?? /content="([\d.]+)"\s*property="product:price:amount"/i.exec(pdpHtml);
+        // Strategy 3: JSON-LD price
+        const jsonLdMatch = /"price"\s*:\s*"?([\d.]+)"?/i.exec(pdpHtml);
+
+        const candidates = [
+          finalPriceMatch?.[1],
+          metaPriceMatch?.[1],
+          jsonLdMatch?.[1],
+        ].filter(Boolean).map(Number).filter(n => n > 0);
+
+        if (candidates.length > 0) {
+          pdpPrice = candidates[0];
+          const diff = Math.abs(pdpPrice - variant.bestPrice);
+          if (diff <= 0.01) {
+            priceVerification = 'verified';
+            console.log(
+              `[scraper] ✅ Price verified: PDP confirms $${pdpPrice.toFixed(2)} ` +
+              `(matches bestPrice $${variant.bestPrice.toFixed(2)})`,
+            );
+          } else {
+            priceVerification = 'mismatch';
+            console.warn(
+              `[scraper] ⚠️ Price mismatch: PDP shows $${pdpPrice.toFixed(2)} ` +
+              `but listing says $${variant.bestPrice.toFixed(2)}`,
+            );
+          }
+        } else {
+          console.warn(`[scraper] Could not extract price from PDP (${pdpHtml.length} chars)`);
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[scraper] Price verification failed: ${msg}`);
+    }
+  }
+
   const [deal] = await db
     .insert(deals)
     .values({
@@ -702,7 +1014,7 @@ async function evaluateAndPersist(
       listPrice: variant.listPrice.toFixed(2),
       bestPrice: variant.bestPrice.toFixed(2),
       discountPercentage: variant.discountPercentage.toFixed(2),
-      imageUrl: variant.imageUrl,
+      imageUrl: variant.imageUrl ? resolveFullUrl(variant.imageUrl, baseUrl) : null,
       productUrl: resolveFullUrl(variant.productUrl, baseUrl),
       filterId: matchedFilter.id,
     })
@@ -717,11 +1029,14 @@ async function evaluateAndPersist(
     webhookDeals.push({
       productName: variant.displayName,
       brand: variant.brand,
-      listPrice: variant.listPrice.toFixed(2),
-      bestPrice: variant.bestPrice.toFixed(2),
+      listPrice: `$${variant.listPrice.toFixed(2)}`,
+      bestPrice: `$${variant.bestPrice.toFixed(2)}`,
       discountPercentage: variant.discountPercentage.toFixed(2),
-      imageUrl: variant.imageUrl,
+      imageUrl: variant.imageUrl ? resolveFullUrl(variant.imageUrl, baseUrl) : null,
       productUrl: resolveFullUrl(variant.productUrl, baseUrl),
+      websiteName,
+      priceVerification,
+      pdpPrice: pdpPrice !== undefined ? `$${pdpPrice.toFixed(2)}` : undefined,
     });
 
     if (onBatchReady && webhookDeals.length >= WEBHOOK_BATCH_SIZE) {
@@ -747,6 +1062,7 @@ export async function executeScrapeJob(
   maxPages: number = DEFAULT_MAX_PAGES,
   ttlDays: number = DEFAULT_TTL_DAYS,
   websiteId?: string,
+  filterId?: string,
 ): Promise<ScrapeResult> {
   const startTime = Date.now();
   const errors: ScrapeError[] = [];
@@ -789,11 +1105,19 @@ export async function executeScrapeJob(
     };
   }
 
-  // Step 3: Fetch active filters
-  const filterRows = await db
-    .select()
-    .from(filters)
-    .where(eq(filters.active, true));
+  // Step 3: Fetch active filters (optionally filtered to a single filter)
+  let filterRows;
+  if (filterId) {
+    filterRows = await db
+      .select()
+      .from(filters)
+      .where(and(eq(filters.active, true), eq(filters.id, filterId)));
+  } else {
+    filterRows = await db
+      .select()
+      .from(filters)
+      .where(eq(filters.active, true));
+  }
 
   const activeFilters = filterRows.map(toFilterWithId);
 
@@ -884,6 +1208,7 @@ export async function executeScrapeJob(
           website.baseUrl,
           webhookDeals,
           flushWebhookBatch,
+          website.name,
         );
 
         // Check if this URL produced any errors during processUrl

@@ -54,7 +54,7 @@ function computeBackoff(
  * Also supports ${AUTH_TOKEN} which resolves from a runtime-provided token.
  * This lets schemas reference secrets without hardcoding them in JSON.
  */
-function interpolateEnvVars(value: string, authToken?: string): string {
+export function interpolateEnvVars(value: string, authToken?: string): string {
   return value.replace(/\$\{([^}]+)\}/g, (match, envKey) => {
     if (envKey === 'AUTH_TOKEN') {
       return authToken ?? '';
@@ -160,7 +160,8 @@ export async function fetchApiJson(
  */
 export async function fetchWithRetry(
   url: string,
-  config: HttpClientConfig
+  config: HttpClientConfig,
+  options?: { headers?: Record<string, string> },
 ): Promise<Response | null> {
   for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
     await enforceRateLimit(config.rateLimit);
@@ -169,7 +170,11 @@ export async function fetchWithRetry(
     const timeoutId = setTimeout(() => controller.abort(), config.timeout);
 
     try {
-      const response = await fetch(url, { signal: controller.signal });
+      const fetchInit: RequestInit = { signal: controller.signal };
+      if (options?.headers && Object.keys(options.headers).length > 0) {
+        fetchInit.headers = options.headers;
+      }
+      const response = await fetch(url, fetchInit);
       clearTimeout(timeoutId);
 
       if (response.ok) {
