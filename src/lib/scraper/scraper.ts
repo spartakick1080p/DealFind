@@ -535,15 +535,17 @@ async function fetchApiPage(
     ...schema.extraction.apiBody,
   };
 
-  // Apply merged params first (URL query params + schema apiParams)
-  for (const [key, value] of Object.entries(mergedParams)) {
-    body[key] = value;
-  }
-
   // Build query params for pagination if needed
   const queryParams: Record<string, string> = {};
 
   if (paginationIn === 'query') {
+    // When pagination is via query params, send ALL merged params (including
+    // URL-derived params like pageCategories) as query params too — the API
+    // expects them there, not in the POST body.
+    for (const [key, value] of Object.entries(mergedParams)) {
+      queryParams[key] = value;
+    }
+
     // Send pagination as URL query parameters
     if (pagination.cursorTemplate) {
       queryParams[offsetParam] = pagination.cursorTemplate.replace('{offset}', String(paginationValue));
@@ -553,10 +555,11 @@ async function fetchApiPage(
     if (!pagination.cursorTemplate) {
       queryParams[limitParam] = String(pageSize);
     }
-    // Remove pagination keys from body so they don't get sent as ignored params
-    delete body[offsetParam];
-    delete body[limitParam];
   } else {
+    // When pagination is in the body, merge params into the body as before
+    for (const [key, value] of Object.entries(mergedParams)) {
+      body[key] = value;
+    }
     // Send pagination in the POST body (original behaviour)
     body[offsetParam] = paginationValue;
     body[limitParam] = pageSize;
