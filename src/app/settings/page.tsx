@@ -1,5 +1,6 @@
 import { getActiveWebsites, getActiveFilters } from './actions';
 import TargetedScrapeForm from '@/components/targeted-scrape-form';
+import RunningJobs from '@/components/running-jobs';
 
 const CONFIG_ITEMS = [
   {
@@ -94,6 +95,9 @@ export default async function SettingsPage() {
           ))}
         </div>
       </section>
+
+      {/* Running Jobs */}
+      <RunningJobs />
 
       {/* Manual Scrape Trigger */}
       <section className="space-y-4">

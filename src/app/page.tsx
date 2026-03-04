@@ -1,6 +1,7 @@
 import { getDashboardMetrics, getRecentDeals, markAsPurchased, clearAllDeals } from '@/lib/metrics-service';
 import PurchaseButton from '@/components/purchase-button';
 import ClearDealsButton from '@/components/clear-deals-button';
+import RunningJobs from '@/components/running-jobs';
 import Image from 'next/image';
 
 async function handlePurchase(dealId: string, actualPrice: number) {
@@ -53,6 +54,9 @@ export default async function DashboardPage() {
           ))}
         </dl>
       </div>
+
+      {/* Running Scrape Jobs */}
+      <RunningJobs />
 
       {/* Recent Deals */}
       <div>

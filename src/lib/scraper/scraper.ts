@@ -25,7 +25,31 @@ import { isNewDeal, markAsSeen, cleanExpiredItems } from '@/lib/seen-tracker';
 import { createNotification } from '@/lib/notification-service';
 import { dispatchWebhooks, type DealPayload } from '@/lib/webhook-service';
 import { decrypt } from '@/lib/crypto';
-import { resetProgress, updateProgress, completeProgress, failProgress, trackUniqueProduct, getUniqueProductCount, isCancelled } from '@/lib/scrape-progress';
+import {
+  createJob as _createJob,
+  resetProgress as _resetProgress,
+  updateProgress as _updateProgress,
+  completeProgress as _completeProgress,
+  failProgress as _failProgress,
+  trackUniqueProduct as _trackUniqueProduct,
+  getUniqueProductCount as _getUniqueProductCount,
+  isCancelled as _isCancelled,
+  type ScrapeProgress,
+} from '@/lib/scrape-progress';
+
+// ---------------------------------------------------------------------------
+// Module-level job ID — set once per executeScrapeJob call.
+// Internal helpers read this so we don't have to thread jobId everywhere.
+// ---------------------------------------------------------------------------
+let _currentJobId = '';
+
+function resetProgress() { _resetProgress(_currentJobId); }
+function updateProgress(u: Partial<ScrapeProgress>) { _updateProgress(_currentJobId, u); }
+function completeProgress(t: number, n: number) { _completeProgress(_currentJobId, t, n); }
+function failProgress(m: string) { _failProgress(_currentJobId, m); }
+function trackUniqueProduct(id: string) { return _trackUniqueProduct(_currentJobId, id); }
+function getUniqueProductCount() { return _getUniqueProductCount(_currentJobId); }
+function isCancelled() { return _isCancelled(_currentJobId); }
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1066,7 +1090,10 @@ export async function executeScrapeJob(
   ttlDays: number = DEFAULT_TTL_DAYS,
   websiteId?: string,
   filterId?: string,
+  jobId?: string,
 ): Promise<ScrapeResult> {
+  // Set the module-level job ID so all internal helpers use it
+  _currentJobId = jobId || '';
   const startTime = Date.now();
   const errors: ScrapeError[] = [];
   const counters = { totalProducts: 0, newDeals: 0 };

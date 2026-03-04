@@ -1,12 +1,9 @@
 import { NextResponse } from 'next/server';
 import { executeScrapeJob } from '@/lib/scraper/scraper';
-
-// ---------------------------------------------------------------------------
-// Concurrency guard – simple module-level flag.
-// Works for single-instance Vercel serverless deployments.
-// ---------------------------------------------------------------------------
-
-let isRunning = false;
+import { createJob } from '@/lib/scrape-progress';
+import { db } from '@/db';
+import { monitoredWebsites } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // GET /api/cron/scrape
@@ -26,16 +23,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // --- Concurrency guard ----------------------------------------------------
-  if (isRunning) {
-    return NextResponse.json(
-      { error: 'A scrape job is already in progress' },
-      { status: 409 },
-    );
-  }
-
-  isRunning = true;
-
   try {
     // Extract optional websiteId from query params or header
     const { searchParams } = new URL(request.url);
@@ -43,13 +30,23 @@ export async function GET(request: Request) {
       ?? request.headers.get('x-website-id')
       ?? undefined;
 
-    const result = await executeScrapeJob(undefined, undefined, undefined, websiteId);
+    // Resolve website name for display
+    let websiteName: string | undefined;
+    if (websiteId) {
+      const rows = await db
+        .select({ name: monitoredWebsites.name })
+        .from(monitoredWebsites)
+        .where(eq(monitoredWebsites.id, websiteId))
+        .limit(1);
+      websiteName = rows[0]?.name;
+    }
+
+    const jobId = createJob(websiteName, undefined, 'scheduled');
+    const result = await executeScrapeJob(undefined, undefined, undefined, websiteId, undefined, jobId);
     return NextResponse.json(result);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.error('[cron/scrape] Unhandled error:', message);
     return NextResponse.json({ error: message }, { status: 500 });
-  } finally {
-    isRunning = false;
   }
 }
