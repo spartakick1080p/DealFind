@@ -188,6 +188,11 @@ export function getUniqueProductCount(jobId: string): number {
   return getJobs().get(jobId)?.uniqueProductIds.size ?? 0;
 }
 
+/** Get the source label for a job ('manual' | 'scheduled' | undefined). */
+export function getJobSource(jobId: string): string | undefined {
+  return getJobs().get(jobId)?.source;
+}
+
 /** Request cancellation of a specific scrape job. */
 export function cancelScrape(jobId: string): void {
   const store = getJobs().get(jobId);

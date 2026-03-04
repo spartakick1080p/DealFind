@@ -112,4 +112,19 @@ export const webhooks = pgTable('webhooks', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+export const scrapeRuns = pgTable('scrape_runs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  websiteId: uuid('website_id').references(() => monitoredWebsites.id, { onDelete: 'set null' }),
+  websiteName: varchar('website_name', { length: 255 }).notNull(),
+  status: varchar('status', { length: 32 }).notNull(), // 'completed' | 'error' | 'cancelled'
+  source: varchar('source', { length: 32 }), // 'manual' | 'scheduled'
+  totalProducts: integer('total_products').default(0).notNull(),
+  newDeals: integer('new_deals').default(0).notNull(),
+  errorCount: integer('error_count').default(0).notNull(),
+  durationMs: integer('duration_ms').default(0).notNull(),
+  errorMessage: text('error_message'),
+  startedAt: timestamp('started_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at').defaultNow().notNull(),
+});
+
 

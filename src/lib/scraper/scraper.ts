@@ -8,7 +8,7 @@
  */
 
 import { db } from '@/db';
-import { deals, filters, monitoredWebsites, productPageUrls } from '@/db/schema';
+import { deals, filters, monitoredWebsites, productPageUrls, scrapeRuns } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 import { fetchWithRetry, fetchApiJson, interpolateEnvVars, type HttpClientConfig } from './http-client';
@@ -34,6 +34,7 @@ import {
   trackUniqueProduct as _trackUniqueProduct,
   getUniqueProductCount as _getUniqueProductCount,
   isCancelled as _isCancelled,
+  getJobSource,
   type ScrapeProgress,
 } from '@/lib/scrape-progress';
 
@@ -1288,6 +1289,27 @@ export async function executeScrapeJob(
     completeProgress(counters.totalProducts, counters.newDeals);
   }
   // If cancelled, status is already 'cancelled' — leave it as-is
+
+  // Step 6: Record scrape run history
+  try {
+    const status = wasCancelled ? 'cancelled' : errors.length > 0 ? 'error' : 'completed';
+    const websiteNames = websites.map(w => w.name).join(', ');
+    await db.insert(scrapeRuns).values({
+      websiteId: websites.length === 1 ? websites[0].id : null,
+      websiteName: websiteNames || 'Unknown',
+      status,
+      source: jobId ? (getJobSource(jobId) ?? null) : null,
+      totalProducts: counters.totalProducts,
+      newDeals: counters.newDeals,
+      errorCount: errors.length,
+      durationMs,
+      errorMessage: errors.length > 0 ? errors.map(e => e.message).join('; ').slice(0, 2000) : null,
+      startedAt: new Date(startTime),
+      completedAt: new Date(),
+    });
+  } catch (err) {
+    console.error(`[scraper] Failed to record scrape run: ${err instanceof Error ? err.message : err}`);
+  }
 
   return {
     totalProductsEncountered: counters.totalProducts,
