@@ -21,7 +21,8 @@ function extractDomain(url: string): string {
 
 export async function addUrl(
   websiteId: string,
-  url: string
+  url: string,
+  note?: string
 ): Promise<ActionResult<typeof productPageUrls.$inferSelect>> {
   const trimmedUrl = url?.trim();
 
@@ -63,9 +64,10 @@ export async function addUrl(
 
   // Insert the URL, catch unique constraint violations
   try {
+    const trimmedNote = note?.trim() || null;
     const [inserted] = await db
       .insert(productPageUrls)
-      .values({ websiteId, url: trimmedUrl })
+      .values({ websiteId, url: trimmedUrl, note: trimmedNote })
       .returning();
 
     revalidatePath(`/websites/${websiteId}`);
@@ -100,6 +102,29 @@ export async function removeUrl(
     return { success: false, error: 'Failed to remove URL' };
   }
 }
+export async function updateUrlNote(
+  urlId: string,
+  note: string
+): Promise<ActionResult> {
+  try {
+    const trimmedNote = note?.trim() || null;
+    const [updated] = await db
+      .update(productPageUrls)
+      .set({ note: trimmedNote })
+      .where(eq(productPageUrls.id, urlId))
+      .returning({ id: productPageUrls.id, websiteId: productPageUrls.websiteId });
+
+    if (!updated) {
+      return { success: false, error: 'URL not found' };
+    }
+
+    revalidatePath(`/websites/${updated.websiteId}`);
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: 'Failed to update note' };
+  }
+}
+
 
 export async function getUrlsByWebsite(
   websiteId: string

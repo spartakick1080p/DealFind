@@ -5,6 +5,7 @@ import { addUrl } from '@/app/websites/[id]/actions';
 
 export default function AddUrlForm({ websiteId }: { websiteId: string }) {
   const [url, setUrl] = useState('');
+  const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [isPending, startTransition] = useTransition();
 
@@ -13,9 +14,10 @@ export default function AddUrlForm({ websiteId }: { websiteId: string }) {
     setError('');
 
     startTransition(async () => {
-      const result = await addUrl(websiteId, url);
+      const result = await addUrl(websiteId, url, note);
       if (result.success) {
         setUrl('');
+        setNote('');
       } else {
         setError(result.error);
       }
@@ -38,6 +40,15 @@ export default function AddUrlForm({ websiteId }: { websiteId: string }) {
             onChange={(e) => setUrl(e.target.value)}
             className="input input-bordered w-full"
             required
+          />
+        </div>
+        <div className="form-control flex-1">
+          <input
+            type="text"
+            placeholder="Note (e.g. Electronics deals page)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            className="input input-bordered w-full"
           />
         </div>
         <button type="submit" disabled={isPending} className="btn btn-primary">

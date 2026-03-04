@@ -34,6 +34,7 @@ export const productPageUrls = pgTable(
     lastScrapeError: text('last_scrape_error'),
     lastScrapeCount: integer('last_scrape_count'),
     lastScrapedAt: timestamp('last_scraped_at'),
+    note: text('note'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => ({

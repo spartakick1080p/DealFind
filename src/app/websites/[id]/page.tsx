@@ -6,6 +6,7 @@ import { productPageUrls } from '@/db/schema';
 import EditWebsiteForm from '@/components/edit-website-form';
 import AddUrlForm from '@/components/add-url-form';
 import RemoveUrlButton from '@/components/remove-url-button';
+import UrlNote from '@/components/url-note';
 import SchemaEditor from '@/components/schema-editor';
 import AuthTokenInput from '@/components/auth-token-input';
 import WebhookManager from '@/components/webhook-manager';
@@ -60,6 +61,7 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
                 <thead>
                   <tr>
                     <th>URL</th>
+                    <th>Note</th>
                     <th>Status</th>
                     <th className="text-right">Actions</th>
                   </tr>
@@ -76,6 +78,9 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
                         >
                           {u.url}
                         </a>
+                      </td>
+                      <td>
+                        <UrlNote urlId={u.id} initialNote={u.note} />
                       </td>
                       <td>
                         {u.lastScrapeStatus === 'ok' && (
