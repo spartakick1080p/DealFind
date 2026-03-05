@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Badge } from './badge';
 
 interface ScrapeProgress {
   status: 'idle' | 'running' | 'done' | 'error' | 'cancelled';
@@ -85,11 +86,9 @@ export default function ActiveJobs() {
                     <p className="text-sm font-medium text-gray-200 truncate">
                       {job.websiteName || 'All websites'}
                     </p>
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                      job.source === 'scheduled' ? 'bg-blue-500/20 text-blue-400' : 'bg-orange-500/20 text-orange-400'
-                    }`}>
+                    <Badge color={job.source === 'scheduled' ? 'blue' : 'orange'}>
                       {job.source === 'scheduled' ? 'Scheduled' : 'Manual'}
-                    </span>
+                    </Badge>
                   </div>
                 </div>
               </div>

@@ -27,6 +27,7 @@ export interface NotificationWithDeal {
     imageUrl: string | null;
     productUrl: string;
     filterName: string | null;
+    websiteName: string | null;
   };
 }
 
@@ -76,6 +77,7 @@ export async function getActiveNotifications(): Promise<NotificationWithDeal[]> 
         imageUrl: deals.imageUrl,
         productUrl: deals.productUrl,
         filterName: filters.name,
+        websiteName: deals.websiteName,
       },
     })
     .from(notifications)

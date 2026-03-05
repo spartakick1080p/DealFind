@@ -47,9 +47,20 @@ export async function addWebhook(
   if (!trimmed) return { success: false, error: 'Webhook URL is required' };
   if (!service) return { success: false, error: 'Service is required' };
 
-  // Basic URL validation
-  try { new URL(trimmed); } catch {
-    return { success: false, error: 'Invalid URL format' };
+  // Validate based on service type
+  if (service === 'sns') {
+    if (!trimmed.startsWith('arn:aws:sns:')) {
+      return { success: false, error: 'Must be a valid SNS Topic ARN (arn:aws:sns:region:account:name)' };
+    }
+  } else if (service === 'sqs') {
+    if (!trimmed.includes('sqs.') || !trimmed.includes('amazonaws.com')) {
+      return { success: false, error: 'Must be a valid SQS Queue URL (https://sqs.region.amazonaws.com/account/queue)' };
+    }
+  } else {
+    // URL validation for Discord/Slack
+    try { new URL(trimmed); } catch {
+      return { success: false, error: 'Invalid URL format' };
+    }
   }
 
   try {

@@ -9,6 +9,8 @@ import { db } from '@/db';
 import { webhooks } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { decrypt } from './crypto';
+import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 
 export interface DealPayload {
   productName: string;
@@ -34,6 +36,8 @@ type Dispatcher = (url: string, deals: DealPayload[], authToken?: string) => Pro
 const dispatchers: Record<string, Dispatcher> = {
   discord: sendDiscord,
   slack: sendSlack,
+  sns: sendSns,
+  sqs: sendSqs,
 };
 
 /**
@@ -150,6 +154,87 @@ async function sendSlack(webhookUrl: string, deals: DealPayload[]): Promise<void
     const text = await res.text().catch(() => '');
     console.error(`[webhook] Slack ${res.status}: ${text}`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// AWS SNS / SQS dispatchers — cross-account publishing
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract the AWS region from an ARN.
+ * ARN format: arn:aws:sns:REGION:ACCOUNT_ID:TOPIC_NAME
+ */
+function regionFromArn(arn: string): string {
+  const parts = arn.split(':');
+  return parts[3] || 'us-east-1';
+}
+
+/**
+ * Build the JSON message payload for SNS/SQS.
+ */
+function buildAwsPayload(deals: DealPayload[]): string {
+  return JSON.stringify({
+    source: 'deal-tracker',
+    timestamp: new Date().toISOString(),
+    dealCount: deals.length,
+    deals: deals.map((d) => ({
+      productName: d.productName,
+      brand: d.brand,
+      listPrice: d.listPrice,
+      bestPrice: d.bestPrice,
+      discountPercentage: d.discountPercentage,
+      productUrl: d.productUrl,
+      imageUrl: d.imageUrl,
+      websiteName: d.websiteName,
+      priceVerification: d.priceVerification,
+    })),
+  });
+}
+
+/**
+ * Amazon SNS — publish to a cross-account topic.
+ * The `url` parameter is the SNS Topic ARN.
+ * The user must add a resource policy granting sns:Publish to our account.
+ */
+async function sendSns(topicArn: string, deals: DealPayload[]): Promise<void> {
+  const region = regionFromArn(topicArn);
+  const client = new SNSClient({ region });
+
+  const message = buildAwsPayload(deals);
+  const subject = `${deals.length} new deal${deals.length !== 1 ? 's' : ''} found`;
+
+  await client.send(new PublishCommand({
+    TopicArn: topicArn,
+    Message: message,
+    Subject: subject.slice(0, 100), // SNS subject max 100 chars
+  }));
+
+  console.log(`[webhook] Published ${deals.length} deal(s) to SNS topic ${topicArn}`);
+}
+
+/**
+ * Amazon SQS — send message to a cross-account queue.
+ * The `url` parameter is the SQS Queue URL.
+ * The user must add a resource policy granting sqs:SendMessage to our account.
+ */
+async function sendSqs(queueUrl: string, deals: DealPayload[]): Promise<void> {
+  // Extract region from queue URL: https://sqs.REGION.amazonaws.com/ACCOUNT/QUEUE
+  const urlMatch = queueUrl.match(/sqs\.([^.]+)\.amazonaws\.com/);
+  const region = urlMatch?.[1] || 'us-east-1';
+  const client = new SQSClient({ region });
+
+  const message = buildAwsPayload(deals);
+
+  await client.send(new SendMessageCommand({
+    QueueUrl: queueUrl,
+    MessageBody: message,
+    MessageAttributes: {
+      source: { DataType: 'String', StringValue: 'deal-tracker' },
+      dealCount: { DataType: 'Number', StringValue: String(deals.length) },
+    },
+  }));
+
+  console.log(`[webhook] Sent ${deals.length} deal(s) to SQS queue ${queueUrl}`);
 }
 
 // ---------------------------------------------------------------------------

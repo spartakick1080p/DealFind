@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import AddFilterForm from './add-filter-form';
 import DeleteFilterButton from './delete-filter-button';
+import { Badge } from './badge';
 import { CATEGORIES } from '@/lib/categories';
 
 interface FilterData {
@@ -40,13 +41,9 @@ export default function FilterCard({ filter }: { filter: FilterData }) {
       <div className="card-body p-5 gap-3">
         <div className="flex items-start justify-between">
           <h3 className="card-title text-base">{filter.name}</h3>
-          <span
-            className={`badge badge-sm ${
-              filter.active ? 'badge-primary' : 'badge-ghost'
-            }`}
-          >
+          <Badge color={filter.active ? 'green' : 'gray'}>
             {filter.active ? 'Active' : 'Inactive'}
-          </span>
+          </Badge>
         </div>
 
         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">

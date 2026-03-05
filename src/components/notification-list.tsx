@@ -34,6 +34,7 @@ export default function NotificationList({
   const [brandFilter, setBrandFilter] = useState('');
   const [filterFilter, setFilterFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [websiteFilter, setWebsiteFilter] = useState('');
   const [sort, setSort] = useState<SortOption>('newest');
   const [isBulkPending, startBulkTransition] = useTransition();
 
@@ -50,6 +51,14 @@ export default function NotificationList({
     const set = new Set<string>();
     for (const n of notifications) {
       if (n.deal.filterName) set.add(n.deal.filterName);
+    }
+    return [...set].sort();
+  }, [notifications]);
+
+  const websiteNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const n of notifications) {
+      if (n.deal.websiteName) set.add(n.deal.websiteName);
     }
     return [...set].sort();
   }, [notifications]);
@@ -83,6 +92,9 @@ export default function NotificationList({
     if (categoryFilter) {
       list = list.filter((n) => matchesCategory(n, categoryFilter));
     }
+    if (websiteFilter) {
+      list = list.filter((n) => n.deal.websiteName === websiteFilter);
+    }
 
     const sorted = [...list];
     switch (sort) {
@@ -104,7 +116,7 @@ export default function NotificationList({
     }
 
     return sorted;
-  }, [notifications, brandFilter, filterFilter, categoryFilter, sort]);
+  }, [notifications, brandFilter, filterFilter, categoryFilter, websiteFilter, sort]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
@@ -128,6 +140,23 @@ export default function NotificationList({
                 ))}
               </select>
             </label>
+
+            {/* Website filter */}
+            {websiteNames.length > 0 && (
+              <label className="form-control">
+                <div className="label py-0"><span className="label-text text-xs">Website</span></div>
+                <select
+                  className="select select-bordered select-sm w-44"
+                  value={websiteFilter}
+                  onChange={(e) => setWebsiteFilter(e.target.value)}
+                >
+                  <option value="">All websites</option>
+                  {websiteNames.map((w) => (
+                    <option key={w} value={w}>{w}</option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             {/* Filter name filter */}
             {filterNames.length > 0 && (
@@ -288,7 +317,7 @@ function NotificationCard({
                 <span className="text-xs text-base-content/50">{deal.brand}</span>
               )}
               {deal.filterName && (
-                <span className="badge badge-xs badge-ghost">{deal.filterName}</span>
+                <span className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset bg-white/10 text-gray-400 ring-white/10">{deal.filterName}</span>
               )}
             </div>
             <p className="text-xs text-base-content/40 mt-1">{timeAgo}</p>

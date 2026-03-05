@@ -199,7 +199,7 @@ async function processUrl(
         );
       } else {
         // Single-page API fetch (no pagination)
-        pageProgress.total += 1;
+        // (total already counted by pre-scan)
         const apiResult = await fetchApiJson(customSchema.extraction.apiUrl!, {
           method: customSchema.extraction.apiMethod,
           params: mergedParams,
@@ -249,7 +249,7 @@ async function processUrl(
     );
   }
 
-  pageProgress.total += 1;
+  // (total already counted by pre-scan)
   const response = await fetchWithRetry(url, httpConfig, fetchHeaders ? { headers: fetchHeaders } : undefined);
   if (!response) {
     errors.push({ url, message: 'Failed to fetch (retries exhausted or unreachable)' });
@@ -387,6 +387,7 @@ async function processUrl(
       );
 
       let consecutiveEmpty = 0;
+      let actualPagesScraped = 1; // page 1 already fetched above
 
       // We already have page 1 (offset 0). Fetch remaining pages.
       for (let page = 1; page < htmlMaxPages; page++) {
@@ -397,11 +398,12 @@ async function processUrl(
 
         console.log(`[scraper] html-dom pagination: fetching page ${page + 1} — ${fullPagedUrl}`);
 
-        pageProgress.total += 1;
+        // (total already counted by pre-scan)
         const pageResponse = await fetchWithRetry(fullPagedUrl, httpConfig, fetchHeaders ? { headers: fetchHeaders } : undefined);
         if (!pageResponse) {
           errors.push({ url: fullPagedUrl, message: 'Failed to fetch html-dom pagination page' });
           pageProgress.completed += 1;
+          actualPagesScraped++;
           console.warn(`[scraper] html-dom pagination: page ${page + 1} fetch FAILED (retries exhausted)`);
           continue;
         }
@@ -434,6 +436,7 @@ async function processUrl(
         if (pageVariants.length === 0) {
           consecutiveEmpty++;
           pageProgress.completed += 1;
+          actualPagesScraped++;
 
           // Log a snippet of the HTML to help diagnose why 0 products were found
           if (pageHtml.length < 5000) {
@@ -458,10 +461,17 @@ async function processUrl(
         consecutiveEmpty = 0;
         allVariants.push(...pageVariants);
         pageProgress.completed += 1;
+        actualPagesScraped++;
         updateProgress({ currentPage: pageProgress.completed, totalPages: pageProgress.total, totalProducts: result.totalProducts + allVariants.length, newDeals: result.newDeals, uniqueProducts: getUniqueProductCount() });
       }
 
       console.log(`[scraper] html-dom pagination complete: ${allVariants.length} total variants across all pages`);
+
+      // Correct the pre-scanned total if we stopped early (empty pages / cancellation).
+      const estimatedPagesForUrl = htmlMaxPages;
+      if (actualPagesScraped < estimatedPagesForUrl) {
+        pageProgress.total -= (estimatedPagesForUrl - actualPagesScraped);
+      }
     }
 
     result.totalProducts += allVariants.length;
@@ -492,7 +502,16 @@ async function processUrl(
   // If listing page, follow pagination up to maxPages
   if (isListingPage(payload)) {
     const pageCount = Math.min(getPageCount(payload), maxPages);
-    pageProgress.total += pageCount - 1; // add extra pages to total
+    // If the actual page count exceeds what pre-scan estimated (e.g. pre-scan
+    // failed and defaulted to 1), bump the total to stay accurate.
+    const extraPages = pageCount - 1; // pages beyond the first
+    if (extraPages > 0) {
+      const neededTotal = pageProgress.completed + extraPages + 1;
+      if (neededTotal > pageProgress.total) {
+        pageProgress.total += (neededTotal - pageProgress.total);
+        updateProgress({ totalPages: pageProgress.total });
+      }
+    }
 
     for (let page = 2; page <= pageCount; page++) {
       if (isCancelled()) break;
@@ -692,9 +711,19 @@ async function fetchApiWithPagination(
     );
   }
 
-  // Update progress with total page count for this URL
+  // Pre-scan already estimated pages for this URL. If the actual total differs,
+  // adjust pageProgress.total to stay accurate.
   const totalPagesForUrl = Math.min(Math.ceil(totalItems / pageSize), maxPages);
-  pageProgress.total += totalPagesForUrl;
+  // Reconcile: if totalItems > 0, pre-scan would have estimated the same
+  // totalPagesForUrl. If totalItems is 0 (unknown), pre-scan estimated 1.
+  // Ensure the total accounts for the actual page count.
+  if (totalItems > 0) {
+    // Pre-scan estimated totalPagesForUrl; if it differs, adjust
+    const neededTotal = pageProgress.completed + totalPagesForUrl;
+    if (neededTotal > pageProgress.total) {
+      pageProgress.total = neededTotal;
+    }
+  }
   pageProgress.completed += 1; // first page done
   updateProgress({
     currentPage: pageProgress.completed,
@@ -905,6 +934,11 @@ async function fetchApiWithPagination(
     console.log(
       `[scraper] API pagination complete (sequential): ${pagesCompleted} pages fetched for ${url}`,
     );
+
+    // Pre-scan estimated 1 page for unknown-total URLs. Now that we know the
+    // actual count, correct the total (pagesCompleted - 1 extra pages beyond
+    // the 1 already estimated).
+    pageProgress.total += (pagesCompleted - 1);
   }
 }
 
@@ -1044,6 +1078,7 @@ async function evaluateAndPersist(
       discountPercentage: variant.discountPercentage.toFixed(2),
       imageUrl: variant.imageUrl ? resolveFullUrl(variant.imageUrl, baseUrl) : null,
       productUrl: resolveFullUrl(variant.productUrl, baseUrl),
+      websiteName: websiteName ?? null,
       filterId: matchedFilter.id,
     })
     .returning();
@@ -1085,6 +1120,89 @@ async function evaluateAndPersist(
  * 4. For each URL: fetch, parse, evaluate variants, persist new deals, notify
  * 5. Log summary and return results
  */
+// ---------------------------------------------------------------------------
+// Pre-scan: estimate total page count for a single URL without full scraping.
+// Used to set an accurate progress denominator before the main scrape loop.
+// ---------------------------------------------------------------------------
+
+async function estimateUrlPageCount(
+  url: string,
+  customSchema?: ProductPageSchema,
+  authToken?: string,
+  maxPages: number = DEFAULT_MAX_PAGES,
+): Promise<number> {
+  try {
+    if (customSchema) {
+      if (customSchema.extraction.method === 'api-json' && customSchema.extraction.apiUrl) {
+        const pagination = customSchema.extraction.pagination;
+        if (!pagination) return 1; // single-page API, no pagination
+
+        const pageSize = pagination.pageSize ?? 120;
+        const totalPath = pagination.totalPath ?? 'total';
+
+        // Merge query params from the URL into the schema's static params
+        const mergedParams: Record<string, string> = { ...customSchema.extraction.apiParams };
+        try {
+          const pageUrl = new URL(url);
+          pageUrl.searchParams.forEach((value, key) => {
+            mergedParams[key] = value;
+          });
+        } catch { /* URL parse failed — use schema defaults */ }
+
+        // Make a lightweight first-page API call to read the total
+        const probeResult = await fetchApiPage(customSchema, mergedParams, pagination, authToken, 0, 0);
+        if (!probeResult?.data) return 1;
+
+        const resolvedTotal = resolveDotPath(probeResult.data, totalPath);
+        if (typeof resolvedTotal === 'number' && resolvedTotal > 0) {
+          const pages = Math.min(Math.ceil(resolvedTotal / pageSize), maxPages);
+          console.log(`[scraper] Pre-scan ${url}: API reports ${resolvedTotal} items → ${pages} pages`);
+          return pages;
+        }
+
+        // Unknown total — use a conservative estimate; the actual scrape will
+        // adjust pageProgress.total as it discovers pages.
+        console.log(`[scraper] Pre-scan ${url}: API total unknown, estimating 1 page (will adjust during scrape)`);
+        return 1;
+      }
+
+      // html-dom with pagination
+      if (customSchema.extraction.method === 'html-dom' && customSchema.extraction.htmlPagination) {
+        const htmlPag = customSchema.extraction.htmlPagination;
+        const pages = Math.min(htmlPag.maxPages ?? 50, maxPages);
+        console.log(`[scraper] Pre-scan ${url}: html-dom pagination, maxPages=${pages}`);
+        return pages;
+      }
+
+      // Custom schema but no pagination — single page
+      return 1;
+    }
+
+    // Default __NEXT_DATA__ parser — fetch page 1 to read page count
+    const response = await fetchWithRetry(url, {
+      ...DEFAULT_HTTP_CONFIG,
+      timeout: 8000,
+      maxRetries: 1,
+    });
+    if (!response) return 1;
+
+    const html = await response.text();
+    const payload = parseNextData(html);
+    if (!payload) return 1;
+
+    if (isListingPage(payload)) {
+      const pages = Math.min(getPageCount(payload), maxPages);
+      console.log(`[scraper] Pre-scan ${url}: __NEXT_DATA__ listing with ${pages} pages`);
+      return pages;
+    }
+
+    return 1;
+  } catch (err) {
+    console.warn(`[scraper] Pre-scan failed for ${url}: ${err instanceof Error ? err.message : err}`);
+    return 1;
+  }
+}
+
 export async function executeScrapeJob(
   httpConfig: HttpClientConfig = DEFAULT_HTTP_CONFIG,
   maxPages: number = DEFAULT_MAX_PAGES,
@@ -1171,23 +1289,34 @@ export async function executeScrapeJob(
     );
   }
 
-  // Step 4: Process each website's URLs
+  // Step 4: Pre-scan — estimate total pages across all URLs before scraping
+  // This gives us an accurate progress denominator from the start.
+  interface WebsiteContext {
+    website: typeof websites[number];
+    customSchema?: ProductPageSchema;
+    schemaError?: string;
+    authToken?: string;
+    urls: { id: string; url: string; websiteId: string }[];
+  }
+  const websiteContexts: WebsiteContext[] = [];
+
   for (const website of websites) {
-    // Check for cancellation
-    if (isCancelled()) {
-      console.log('[scraper] Job cancelled by user');
-      break;
-    }
-    // Parse custom schema if available
     let customSchema: ProductPageSchema | undefined;
+    let schemaError: string | undefined;
     if (website.productSchema) {
       const schemaResult = parseSchemaJson(website.productSchema);
       if (schemaResult.valid) {
         customSchema = schemaResult.schema;
+      } else {
+        schemaError = schemaResult.error;
+        console.error(`[scraper] Schema error for "${website.name}": ${schemaResult.error}`);
+        errors.push({
+          url: website.baseUrl,
+          message: `Schema configuration error for "${website.name}": ${schemaResult.error}. Fix the schema in the website settings.`,
+        });
       }
     }
 
-    // Decrypt auth token if stored
     let authToken: string | undefined;
     if (website.authToken) {
       try { authToken = decrypt(website.authToken); } catch { /* skip */ }
@@ -1197,6 +1326,38 @@ export async function executeScrapeJob(
       .select()
       .from(productPageUrls)
       .where(eq(productPageUrls.websiteId, website.id));
+
+    websiteContexts.push({ website, customSchema, schemaError, authToken, urls: urls as { id: string; url: string; websiteId: string }[] });
+  }
+
+  // Estimate total pages for each URL
+  let estimatedTotalPages = 0;
+  for (const ctx of websiteContexts) {
+    for (const urlRow of ctx.urls) {
+      const estimated = await estimateUrlPageCount(
+        urlRow.url, ctx.customSchema, ctx.authToken, maxPages,
+      );
+      estimatedTotalPages += estimated;
+    }
+  }
+
+  pageProgress.total = estimatedTotalPages;
+  console.log(`[scraper] Pre-scan complete: estimated ${estimatedTotalPages} total pages across ${websiteContexts.reduce((n, c) => n + c.urls.length, 0)} URLs`);
+  updateProgress({ totalPages: pageProgress.total });
+
+  // Step 5: Process each website's URLs
+  for (const { website, customSchema, schemaError, authToken, urls } of websiteContexts) {
+    // Check for cancellation
+    if (isCancelled()) {
+      console.log('[scraper] Job cancelled by user');
+      break;
+    }
+
+    // Skip websites with broken schemas — error already recorded above
+    if (schemaError && website.productSchema) {
+      console.log(`[scraper] Skipping "${website.name}" due to schema error: ${schemaError}`);
+      continue;
+    }
 
     // Track seen compositeIds within this website to deduplicate across URLs
     const seenIds = new Set<string>();
@@ -1276,7 +1437,7 @@ export async function executeScrapeJob(
     await flushWebhookBatch();
   }
 
-  // Step 5: Log summary
+  // Step 6: Log summary
   const durationMs = Date.now() - startTime;
   const wasCancelled = isCancelled();
   console.log(
@@ -1290,7 +1451,7 @@ export async function executeScrapeJob(
   }
   // If cancelled, status is already 'cancelled' — leave it as-is
 
-  // Step 6: Record scrape run history
+  // Step 7: Record scrape run history
   try {
     const status = wasCancelled ? 'cancelled' : errors.length > 0 ? 'error' : 'completed';
     const websiteNames = websites.map(w => w.name).join(', ');

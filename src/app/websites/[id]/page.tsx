@@ -10,6 +10,7 @@ import UrlNote from '@/components/url-note';
 import SchemaEditor from '@/components/schema-editor';
 import AuthTokenInput from '@/components/auth-token-input';
 import WebhookManager from '@/components/webhook-manager';
+import { Badge } from '@/components/badge';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -41,9 +42,9 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
           ← Back
         </Link>
         <h1 className="text-2xl font-bold">{website.name}</h1>
-        <span className={`badge ${website.active ? 'badge-primary' : 'badge-ghost'}`}>
+        <Badge color={website.active ? 'green' : 'gray'}>
           {website.active ? 'Active' : 'Inactive'}
-        </span>
+        </Badge>
       </div>
 
       <EditWebsiteForm website={website} />
@@ -85,7 +86,7 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
                       <td>
                         {u.lastScrapeStatus === 'ok' && (
                           <div className="flex items-center gap-1.5">
-                            <span className="badge badge-success badge-xs">OK</span>
+                            <Badge color="green">OK</Badge>
                             <span className="text-xs text-base-content/50">
                               {u.lastScrapeCount ?? 0} products
                             </span>
@@ -93,11 +94,11 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
                         )}
                         {u.lastScrapeStatus === 'error' && (
                           <div className="tooltip tooltip-error" data-tip={u.lastScrapeError ?? 'Unknown error'}>
-                            <span className="badge badge-error badge-xs cursor-help">Error</span>
+                            <Badge color="red" className="cursor-help">Error</Badge>
                           </div>
                         )}
                         {!u.lastScrapeStatus && (
-                          <span className="badge badge-ghost badge-xs">Not scraped</span>
+                          <Badge color="gray">Not scraped</Badge>
                         )}
                         {u.lastScrapedAt && (
                           <div className="text-[10px] text-base-content/40 mt-0.5">

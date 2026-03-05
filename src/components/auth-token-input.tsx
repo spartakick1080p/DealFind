@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { updateAuthToken, getAuthTokenPreview } from '@/app/websites/[id]/actions';
+import { Badge } from '@/components/badge';
 
 interface AuthTokenInputProps {
   websiteId: string;
@@ -56,7 +57,7 @@ export default function AuthTokenInput({ websiteId }: AuthTokenInputProps) {
           <h2 className="card-title text-lg">Auth Token</h2>
           {preview?.hasToken && (
             <div className="flex items-center gap-2">
-              <span className="badge badge-success badge-sm">Active</span>
+              <Badge color="green">Active</Badge>
               <code className="text-xs text-base-content/50">{preview.preview}</code>
             </div>
           )}

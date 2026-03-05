@@ -3,6 +3,7 @@ import { getWebsites } from './actions';
 import AddWebsiteForm from '@/components/add-website-form';
 import DeleteWebsiteButton from '@/components/delete-website-button';
 import WebsiteSchemaToggle from '@/components/website-schema-toggle';
+import { Badge } from '@/components/badge';
 
 export default async function WebsitesPage() {
   const result = await getWebsites();
@@ -34,13 +35,9 @@ export default async function WebsitesPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{site.name}</span>
-                      <span
-                        className={`badge badge-sm ${
-                          site.active ? 'badge-primary' : 'badge-ghost'
-                        }`}
-                      >
+                      <Badge color={site.active ? 'green' : 'gray'}>
                         {site.active ? 'Active' : 'Inactive'}
-                      </span>
+                      </Badge>
                     </div>
                     <p className="text-sm text-base-content/60 truncate">{site.baseUrl}</p>
                   </div>

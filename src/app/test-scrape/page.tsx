@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo, type FormEvent } from 'react';
 import { validateScrapeUrl } from '@/lib/scraper/validate-url';
 import type { ProductVariant } from '@/lib/scraper/parser';
+import { Toggle } from '@/components/toggle';
+import { Badge } from '@/components/badge';
 
 interface ScrapeResult {
   variants: ProductVariant[];
@@ -214,15 +216,7 @@ export default function TestScrapePage() {
               onChange={(e) => setUrl(e.target.value)}
               disabled={loading}
             />
-            <label className="flex items-center gap-2 cursor-pointer shrink-0">
-              <input
-                type="checkbox"
-                className="toggle toggle-sm toggle-primary"
-                checked={hideOutOfStock}
-                onChange={(e) => setHideOutOfStock(e.target.checked)}
-              />
-              <span className="label-text text-xs whitespace-nowrap">In stock only</span>
-            </label>
+            <Toggle checked={hideOutOfStock} onChange={setHideOutOfStock} label="In stock only" size="sm" />
             <button
               type="submit"
               className="btn btn-primary min-w-[120px]"
@@ -254,24 +248,24 @@ export default function TestScrapePage() {
           {/* Summary Bar */}
           <div className="card bg-base-300 shadow-lg">
             <div className="card-body p-4 flex-row items-center gap-4 flex-wrap">
-              <div className="badge badge-primary badge-lg">
+              <Badge color="orange">
                 {result.count} product{result.count !== 1 ? 's' : ''} returned
-              </div>
+              </Badge>
               {activeFilter && (
-                <div className="badge badge-warning badge-lg">
+                <Badge color="yellow">
                   {filteredVariants.length} matched filter &quot;{activeFilter.name}&quot;
-                </div>
+                </Badge>
               )}
-              <div className="badge badge-secondary badge-lg capitalize">{result.pageType} page</div>
+              <Badge color="gray">{result.pageType} page</Badge>
               {result.schemaUsed && (
-                <div className={`badge badge-lg ${result.schemaUsed.includes('custom') ? 'badge-accent' : 'badge-ghost'}`}>
+                <Badge color={result.schemaUsed.includes('custom') ? 'orange' : 'gray'}>
                   {result.schemaUsed} schema
-                </div>
+                </Badge>
               )}
               {selectedCategory && (
-                <div className="badge badge-info badge-lg">
+                <Badge color="blue">
                   Category: {selectedCategory}
-                </div>
+                </Badge>
               )}
             </div>
           </div>
@@ -402,7 +396,7 @@ function ProductCard({
       {/* Discount badge overlay */}
       {hasDiscount && (
         <div className="absolute top-1 right-1 z-10">
-          <span className="badge badge-xs badge-success font-bold">
+          <span className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset bg-green-500/15 text-green-400 ring-green-500/20">
             -{variant.discountPercentage}%
           </span>
         </div>
@@ -411,7 +405,7 @@ function ProductCard({
       {/* Stock badge overlay */}
       {!variant.inStock && (
         <div className="absolute top-1 left-1 z-10">
-          <span className="badge badge-xs badge-error">OOS</span>
+          <span className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset bg-red-500/15 text-red-400 ring-red-500/20">OOS</span>
         </div>
       )}
 

@@ -1,7 +1,17 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef } from 'react';
+import { Badge } from './badge';
+import {
+  Pagination,
+  PaginationPrevious,
+  PaginationNext,
+  PaginationList,
+  PaginationPage,
+  PaginationGap,
+} from './pagination';
 
 interface ScrapeRun {
   id: string;
@@ -17,6 +27,8 @@ interface ScrapeRun {
   startedAt: Date | string;
   completedAt: Date | string;
 }
+
+const PAGE_SIZE = 10;
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -38,22 +50,25 @@ function formatTime(date: Date | string): string {
   });
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    completed: 'bg-green-500/20 text-green-400',
-    error: 'bg-red-500/20 text-red-400',
-    cancelled: 'bg-yellow-500/20 text-yellow-400',
-  };
-  return (
-    <span className={`text-xs px-1.5 py-0.5 rounded ${styles[status] ?? 'bg-gray-500/20 text-gray-400'}`}>
-      {status}
-    </span>
-  );
-}
+const statusColors: Record<string, string> = {
+  completed: 'green',
+  error: 'red',
+  cancelled: 'yellow',
+};
+
+const sourceColors: Record<string, string> = {
+  scheduled: 'blue',
+  manual: 'orange',
+};
 
 export default function ScrapeHistoryTable({ initialHistory }: { initialHistory: ScrapeRun[] }) {
   const router = useRouter();
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [page, setPage] = useState(1);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const totalPages = Math.max(1, Math.ceil(initialHistory.length / PAGE_SIZE));
+  const paged = initialHistory.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Auto-refresh the page every 30s to pick up newly completed scrapes
   useEffect(() => {
@@ -74,6 +89,22 @@ export default function ScrapeHistoryTable({ initialHistory }: { initialHistory:
     );
   }
 
+  function buildPageNumbers(): (number | 'gap')[] {
+    const pages: (number | 'gap')[] = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      if (page > 3) pages.push('gap');
+      for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) {
+        pages.push(i);
+      }
+      if (page < totalPages - 2) pages.push('gap');
+      pages.push(totalPages);
+    }
+    return pages;
+  }
+
   return (
     <section>
       <h2 className="text-lg font-semibold text-gray-300 mb-3">Scrape History</h2>
@@ -92,8 +123,12 @@ export default function ScrapeHistoryTable({ initialHistory }: { initialHistory:
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {initialHistory.map((run) => (
-                <tr key={run.id} className="hover:bg-white/[0.02] transition-colors">
+              {paged.map((run) => (
+                <tr
+                  key={run.id}
+                  className="hover:bg-white/[0.02] transition-colors cursor-pointer"
+                  onClick={() => run.errorMessage ? setExpandedId(expandedId === run.id ? null : run.id) : undefined}
+                >
                   <td className="px-4 py-3 text-gray-400 whitespace-nowrap">
                     {formatTime(run.startedAt)}
                   </td>
@@ -101,14 +136,10 @@ export default function ScrapeHistoryTable({ initialHistory }: { initialHistory:
                     {run.websiteName}
                   </td>
                   <td className="px-4 py-3">
-                    <StatusBadge status={run.status} />
+                    <Badge color={statusColors[run.status] ?? 'gray'}>{run.status}</Badge>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                      run.source === 'scheduled' ? 'bg-blue-500/20 text-blue-400' : 'bg-orange-500/20 text-orange-400'
-                    }`}>
-                      {run.source ?? 'manual'}
-                    </span>
+                    <Badge color={sourceColors[run.source ?? 'manual'] ?? 'orange'}>{run.source ?? 'manual'}</Badge>
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-gray-300">
                     {run.totalProducts.toLocaleString()}
@@ -124,6 +155,50 @@ export default function ScrapeHistoryTable({ initialHistory }: { initialHistory:
             </tbody>
           </table>
         </div>
+
+        {/* Error detail expansion */}
+        {expandedId && (() => {
+          const run = paged.find((r) => r.id === expandedId);
+          if (!run?.errorMessage) return null;
+          return (
+            <div className="border-t border-white/10 px-4 py-3 bg-red-500/5">
+              <p className="text-xs text-red-400 font-medium mb-1">Error Details</p>
+              <p className="text-xs text-gray-400 whitespace-pre-wrap break-words font-mono">{run.errorMessage}</p>
+            </div>
+          );
+        })()}
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="border-t border-white/10 px-4 py-3">
+            <Pagination>
+              <PaginationPrevious
+                href={page > 1 ? '#' : undefined}
+                onClick={(e) => { e.preventDefault(); if (page > 1) setPage(page - 1); }}
+              />
+              <PaginationList>
+                {buildPageNumbers().map((p, i) =>
+                  p === 'gap' ? (
+                    <PaginationGap key={`gap-${i}`} />
+                  ) : (
+                    <PaginationPage
+                      key={p}
+                      current={p === page}
+                      href="#"
+                      onClick={(e) => { e.preventDefault(); setPage(p); }}
+                    >
+                      {p}
+                    </PaginationPage>
+                  ),
+                )}
+              </PaginationList>
+              <PaginationNext
+                href={page < totalPages ? '#' : undefined}
+                onClick={(e) => { e.preventDefault(); if (page < totalPages) setPage(page + 1); }}
+              />
+            </Pagination>
+          </div>
+        )}
       </div>
     </section>
   );

@@ -12,7 +12,7 @@ export default async function NavBadge() {
   if (count === 0) return null;
 
   return (
-    <span className="badge badge-sm badge-primary text-primary-content">
+    <span className="text-xs font-medium tabular-nums text-orange-400">
       {count > 99 ? '99+' : count}
     </span>
   );

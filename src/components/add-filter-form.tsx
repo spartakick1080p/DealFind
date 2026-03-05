@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import { createFilter, updateFilter } from '@/app/filters/actions';
 import CategorySelect from './category-select';
+import { Toggle } from '@/components/toggle';
 
 interface FilterData {
   id: string;
@@ -184,15 +185,7 @@ export default function AddFilterForm({
           />
           {isEditing && (
             <div className="form-control">
-              <label className="label cursor-pointer justify-start gap-3 py-1">
-                <input
-                  type="checkbox"
-                  checked={active}
-                  onChange={(e) => setActive(e.target.checked)}
-                  className="toggle toggle-primary"
-                />
-                <span className="label-text">Active</span>
-              </label>
+              <Toggle checked={active} onChange={setActive} label="Active" />
             </div>
           )}
         </div>

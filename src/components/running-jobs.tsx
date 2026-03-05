@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Badge } from './badge';
 
 interface ScrapeProgress {
   status: 'idle' | 'running' | 'done' | 'error' | 'cancelled';
@@ -76,9 +77,7 @@ export default function RunningJobs() {
           const isCancelling = cancellingIds.has(job.jobId);
           const label = job.websiteName || 'All websites';
           const sourceLabel = job.source === 'scheduled' ? 'Scheduled' : 'Manual';
-          const sourceBadgeClass = job.source === 'scheduled'
-            ? 'badge badge-xs badge-info'
-            : 'badge badge-xs badge-accent';
+          const sourceColor = job.source === 'scheduled' ? 'blue' : 'orange';
 
           return (
             <div key={job.jobId} className="card bg-base-300 shadow-lg">
@@ -89,7 +88,7 @@ export default function RunningJobs() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-medium truncate">{label}</p>
-                        <span className={sourceBadgeClass}>{sourceLabel}</span>
+                        <Badge color={sourceColor}>{sourceLabel}</Badge>
                       </div>
                       {job.filterName && (
                         <p className="text-xs text-base-content/50">Filter: {job.filterName}</p>

@@ -72,6 +72,7 @@ export const deals = pgTable('deals', {
   }).notNull(),
   imageUrl: varchar('image_url', { length: 2048 }),
   productUrl: varchar('product_url', { length: 2048 }).notNull(),
+  websiteName: varchar('website_name', { length: 255 }),
   filterId: uuid('filter_id').references(() => filters.id),
   foundAt: timestamp('found_at').defaultNow().notNull(),
 });

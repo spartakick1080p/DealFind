@@ -111,7 +111,7 @@ export default function CategorySelect({
             return (
               <span
                 key={v}
-                className="badge badge-sm badge-primary gap-1"
+                className="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium ring-1 ring-inset bg-orange-500/15 text-orange-400 ring-orange-500/20 gap-1"
               >
                 {cat?.label ?? v}
                 <button

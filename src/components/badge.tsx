@@ -17,14 +17,15 @@ type BadgeProps = {
   color?: string;
 } & React.HTMLAttributes<HTMLSpanElement>;
 
-export function Badge({ color = 'orange', className, children, ...props }: BadgeProps) {
+export function Badge({ color = 'orange', className, children, style, ...props }: BadgeProps) {
   return (
     <span
       className={clsx(
-        'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset',
+        'inline-flex items-center px-2 py-0.5 text-xs font-medium ring-1 ring-inset',
         colorMap[color] ?? colorMap.gray,
         className,
       )}
+      style={{ borderRadius: '9999px', ...style }}
       {...props}
     >
       {children}

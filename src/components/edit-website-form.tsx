@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { updateWebsite } from '@/app/websites/actions';
+import { Toggle } from '@/components/toggle';
 
 interface EditWebsiteFormProps {
   website: {
@@ -122,15 +123,7 @@ export default function EditWebsiteForm({ website }: EditWebsiteFormProps) {
           </label>
         </div>
         <div className="form-control">
-          <label className="label cursor-pointer justify-start gap-3">
-            <input
-              type="checkbox"
-              checked={active}
-              onChange={(e) => setActive(e.target.checked)}
-              className="toggle toggle-primary"
-            />
-            <span className="label-text">Active</span>
-          </label>
+          <Toggle checked={active} onChange={setActive} label="Active" />
         </div>
         <div className="card-actions justify-end">
           <button type="submit" disabled={isPending} className="btn btn-primary">
