@@ -4,6 +4,8 @@ import { desc } from 'drizzle-orm';
 import ActiveJobs from '@/components/active-jobs';
 import ScrapeHistoryTable from '@/components/scrape-history-table';
 
+export const dynamic = 'force-dynamic';
+
 export default async function ScrapesPage() {
   let history: (typeof scrapeRuns.$inferSelect)[] = [];
 
