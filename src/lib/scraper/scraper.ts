@@ -172,6 +172,7 @@ async function processUrl(
   webhookDeals?: DealPayload[],
   onBatchReady?: () => Promise<void>,
   websiteName?: string,
+  diagnostics?: Map<string, string>,
 ): Promise<void> {
   // If a custom schema is provided, use the schema-driven parser
   if (customSchema) {
@@ -213,7 +214,10 @@ async function processUrl(
           return;
         }
 
-        const { variants } = parseFromApiData(apiResult.data, customSchema);
+        const { variants, diagnostic } = parseFromApiData(apiResult.data, customSchema);
+        if (variants.length === 0 && diagnostic && diagnostics) {
+          diagnostics.set(url, diagnostic);
+        }
         result.totalProducts += variants.length;
         const bestVariants = pickBestVariantPerProduct(variants);
         for (const variant of bestVariants) {
@@ -372,7 +376,7 @@ async function processUrl(
   if (customSchema) {
     // HTML-based custom schema — parse first page
     let allVariants: ProductVariant[] = [];
-    const { variants } = parseWithSchema(html, customSchema);
+    const { variants, diagnostic } = parseWithSchema(html, customSchema);
     allVariants.push(...variants);
 
     // html-dom pagination: fetch additional pages if configured
@@ -475,6 +479,10 @@ async function processUrl(
     }
 
     result.totalProducts += allVariants.length;
+    // Capture diagnostic if 0 products found across all pages
+    if (allVariants.length === 0 && diagnostic && diagnostics) {
+      diagnostics.set(url, diagnostic);
+    }
     const bestVariants = pickBestVariantPerProduct(allVariants);
     for (const variant of bestVariants) {
       if (seenIds) {
@@ -1362,6 +1370,7 @@ export async function executeScrapeJob(
     // Track seen compositeIds within this website to deduplicate across URLs
     const seenIds = new Set<string>();
     const webhookDeals: DealPayload[] = [];
+    const urlDiagnostics = new Map<string, string>();
 
     // Flush accumulated webhook deals — called automatically by evaluateAndPersist
     // when the batch bucket reaches WEBHOOK_BATCH_SIZE, and once more at the end
@@ -1401,17 +1410,36 @@ export async function executeScrapeJob(
           webhookDeals,
           flushWebhookBatch,
           website.name,
+          urlDiagnostics,
         );
 
         // Check if this URL produced any errors during processUrl
         const urlError = errors.find((e) => e.url === urlRow.url);
         const productsFromUrl = counters.totalProducts - before;
+        const urlDiag = urlDiagnostics.get(urlRow.url);
+
+        // Determine status: error > warning (0 products with diagnostic) > ok
+        let status: string;
+        let errorMsg: string | null;
+        if (urlError) {
+          status = 'error';
+          errorMsg = urlError.message;
+        } else if (productsFromUrl === 0 && urlDiag) {
+          status = 'warning';
+          errorMsg = urlDiag;
+        } else if (productsFromUrl === 0) {
+          status = 'warning';
+          errorMsg = 'Scrape completed but found 0 products. The schema may not match the page structure.';
+        } else {
+          status = 'ok';
+          errorMsg = null;
+        }
 
         await db
           .update(productPageUrls)
           .set({
-            lastScrapeStatus: urlError ? 'error' : 'ok',
-            lastScrapeError: urlError?.message ?? null,
+            lastScrapeStatus: status,
+            lastScrapeError: errorMsg,
             lastScrapeCount: productsFromUrl,
             lastScrapedAt: new Date(),
           })

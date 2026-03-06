@@ -182,20 +182,43 @@ function extractJsonFromHtml(
   html: string,
   config: ExtractionConfig
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): any | null {
+): { data: any | null; diagnostic?: string } {
   if (config.method === 'script-json') {
-    return extractScriptJson(html, config.selector ?? 'script#__NEXT_DATA__');
+    const data = extractScriptJson(html, config.selector ?? 'script#__NEXT_DATA__');
+    if (!data) {
+      const selector = config.selector ?? 'script#__NEXT_DATA__';
+      return { data: null, diagnostic: `No <script> tag matching selector "${selector}" found in HTML (${html.length} chars). Verify the selector matches an element on the page.` };
+    }
+    return { data };
   }
   if (config.method === 'json-ld') {
-    return extractJsonLd(html, config.jsonLdType ?? 'Product');
+    const data = extractJsonLd(html, config.jsonLdType ?? 'Product');
+    if (!data) {
+      const type = config.jsonLdType ?? 'Product';
+      // Check if any JSON-LD exists at all
+      const hasJsonLd = /<script[^>]*type=["']application\/ld\+json["']/i.test(html);
+      const detail = hasJsonLd
+        ? `JSON-LD scripts found but none with @type="${type}". Check the jsonLdType setting.`
+        : `No JSON-LD scripts found in HTML (${html.length} chars).`;
+      return { data: null, diagnostic: detail };
+    }
+    return { data };
   }
   if (config.method === 'meta-tags') {
-    return extractMetaTags(html);
+    const data = extractMetaTags(html);
+    if (!data) {
+      return { data: null, diagnostic: `No meta tags with property/name+content found in HTML (${html.length} chars).` };
+    }
+    return { data };
   }
   if (config.method === 'html-dom') {
-    return extractHtmlDom(html, config);
+    const result = extractHtmlDom(html, config);
+    if (!result.data) {
+      return { data: null, diagnostic: result.diagnostic };
+    }
+    return result;
   }
-  return null;
+  return { data: null, diagnostic: `Unknown extraction method "${config.method}".` };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -281,9 +304,12 @@ function extractMetaTags(html: string): Record<string, any> {
  * `htmlFields` regexes extract field values from each chunk.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractHtmlDom(html: string, config: ExtractionConfig): any | null {
+function extractHtmlDom(html: string, config: ExtractionConfig): { data: any | null; diagnostic?: string } {
   const itemSelector = config.itemSelector;
-  if (!itemSelector || !config.htmlFields) return null;
+  if (!itemSelector || !config.htmlFields) {
+    const missing = !itemSelector ? 'itemSelector' : 'htmlFields';
+    return { data: null, diagnostic: `html-dom schema missing required field "${missing}".` };
+  }
 
   // Optionally narrow the HTML to a container element before chunking.
   // This avoids matching itemSelector elements in sidebars, recommendations, etc.
@@ -352,14 +378,31 @@ function extractHtmlDom(html: string, config: ExtractionConfig): any | null {
   // Split HTML into product card chunks using the item selector as a delimiter.
   // We look for the opening tag that matches the selector pattern.
   // e.g. 'div.product-card' → <div class="...product-card...">
-  const { tagName, className } = parseItemSelector(itemSelector);
+  const { tagName, className, id: selectorId } = parseItemSelector(itemSelector);
 
-  // Support both double-quoted and single-quoted class attributes
-  const escapedClass = escapeRegex(className);
-  const chunkRegex = new RegExp(
-    `<${tagName}[^>]*class=["'][^"']*\\b${escapedClass}\\b[^"']*["'][^>]*>`,
-    'gi'
-  );
+  let chunkRegex: RegExp;
+  if (selectorId) {
+    // ID-based selector: match tag with the given id attribute
+    const escapedId = escapeRegex(selectorId);
+    chunkRegex = new RegExp(
+      `<${tagName}[^>]*id=["']${escapedId}["'][^>]*>`,
+      'gi'
+    );
+  } else if (className) {
+    // Class-based selector: match tag with the given class
+    // Support both double-quoted and single-quoted class attributes
+    const escapedClass = escapeRegex(className);
+    chunkRegex = new RegExp(
+      `<${tagName}[^>]*class=["'][^"']*\\b${escapedClass}\\b[^"']*["'][^>]*>`,
+      'gi'
+    );
+  } else {
+    // Tag-only selector (e.g. custom elements like 'product-card'): match any opening tag
+    chunkRegex = new RegExp(
+      `<${escapeRegex(tagName)}[\\s>/][^>]*>`,
+      'gi'
+    );
+  }
 
   // Find all opening tag positions and their full match length
   const matchPositions: { index: number; length: number }[] = [];
@@ -369,22 +412,27 @@ function extractHtmlDom(html: string, config: ExtractionConfig): any | null {
   }
 
   if (matchPositions.length === 0) {
-    // Debug: log a snippet of the HTML around the first occurrence of the class name
-    // to help diagnose selector mismatches
-    const classIdx = searchHtml.indexOf(className);
+    // Debug: log a snippet of the HTML around the first occurrence of the selector target
+    const searchTerm = className || tagName;
+    const classIdx = searchHtml.indexOf(searchTerm);
+    let diagnostic: string;
     if (classIdx >= 0) {
       const snippet = searchHtml.slice(Math.max(0, classIdx - 100), classIdx + 200).replace(/\n/g, ' ');
       console.warn(
         `[schema-parser] itemSelector "${itemSelector}" matched 0 elements via regex, ` +
-        `but class name "${className}" found in HTML at index ${classIdx}. Snippet: ...${snippet}...`,
+        `but "${searchTerm}" found in HTML at index ${classIdx}. Snippet: ...${snippet}...`,
       );
+      diagnostic = className
+        ? `itemSelector "${itemSelector}" matched 0 elements, but class "${className}" exists in the HTML. The tag name or class format may not match the regex pattern. Check that the selector matches the actual HTML structure.`
+        : `itemSelector "${itemSelector}" matched 0 elements, but tag "${tagName}" exists in the HTML. The element may be self-closing or have an unexpected format.`;
     } else {
       console.warn(
         `[schema-parser] itemSelector "${itemSelector}" matched 0 elements — ` +
-        `class name "${className}" not found anywhere in the HTML (${searchHtml.length} chars)`,
+        `"${searchTerm}" not found anywhere in the HTML (${searchHtml.length} chars)`,
       );
+      diagnostic = `itemSelector "${itemSelector}" matched 0 elements — "${searchTerm}" not found in HTML (${searchHtml.length} chars). The page may have a different structure than expected.`;
     }
-    return null;
+    return { data: null, diagnostic };
   }
 
   // Extract each product chunk using proper tag-depth matching.
@@ -452,9 +500,13 @@ function extractHtmlDom(html: string, config: ExtractionConfig): any | null {
       `[schema-parser] Found ${matchPositions.length} "${itemSelector}" elements but 0 had a valid productId. ` +
       `productId regex: ${pidPattern}`,
     );
+    return {
+      data: { products },
+      diagnostic: `Found ${matchPositions.length} "${itemSelector}" elements but 0 had a valid productId. productId regex: ${pidPattern}. Check that the productId regex has a capture group matching actual product IDs in the HTML.`,
+    };
   }
 
-  return { products };
+  return { data: { products } };
 }
 
 /** Parse a simple CSS selector like 'div.product-card' or 'div#product-list' into tag + class/id */
@@ -603,21 +655,29 @@ function normaliseBrand(raw: any): string | null {
 export function parseWithSchema(
   html: string,
   schema: ProductPageSchema
-): { variants: ProductVariant[]; pageType: 'listing' | 'product' | 'unknown' } {
+): { variants: ProductVariant[]; pageType: 'listing' | 'product' | 'unknown'; diagnostic?: string } {
   if (schema.extraction.method === 'api-json') {
     // api-json schemas should not be called with HTML — return empty
-    return { variants: [], pageType: 'unknown' };
+    return { variants: [], pageType: 'unknown', diagnostic: 'api-json schema called with HTML instead of API data' };
   }
 
-  const data = extractJsonFromHtml(html, schema.extraction);
-  if (!data) {
-    return { variants: [], pageType: 'unknown' };
+  const extraction = extractJsonFromHtml(html, schema.extraction);
+  if (!extraction.data) {
+    return { variants: [], pageType: 'unknown', diagnostic: extraction.diagnostic };
   }
 
   // For html-dom, the extracted data has a flat `products` array where
   // field names match the htmlFields keys directly. Map them through
   // paths.fields which should use the same keys.
-  return extractFromData(data, schema.paths);
+  const result = extractFromData(extraction.data, schema.paths);
+  if (result.variants.length === 0 && !result.diagnostic) {
+    // Data was extracted but no variants produced — paths likely wrong
+    const dataKeys = extraction.data && typeof extraction.data === 'object'
+      ? Object.keys(extraction.data).join(', ')
+      : typeof extraction.data;
+    result.diagnostic = `Extraction succeeded (keys: ${dataKeys}) but productsArray path "${schema.paths.productsArray}" yielded 0 products. Check your paths configuration.`;
+  }
+  return result;
 }
 
 /**
@@ -627,11 +687,16 @@ export function parseFromApiData(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any,
   schema: ProductPageSchema
-): { variants: ProductVariant[]; pageType: 'listing' | 'product' | 'unknown' } {
+): { variants: ProductVariant[]; pageType: 'listing' | 'product' | 'unknown'; diagnostic?: string } {
   if (!data) {
-    return { variants: [], pageType: 'unknown' };
+    return { variants: [], pageType: 'unknown', diagnostic: 'API returned no data' };
   }
-  return extractFromData(data, schema.paths);
+  const result = extractFromData(data, schema.paths);
+  if (result.variants.length === 0 && !result.diagnostic) {
+    const dataKeys = data && typeof data === 'object' ? Object.keys(data).join(', ') : typeof data;
+    result.diagnostic = `API returned data (keys: ${dataKeys}) but productsArray path "${schema.paths.productsArray}" yielded 0 products. Check your paths configuration.`;
+  }
+  return result;
 }
 
 /**
@@ -641,7 +706,7 @@ function extractFromData(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any,
   paths: PathConfig
-): { variants: ProductVariant[]; pageType: 'listing' | 'product' | 'unknown' } {
+): { variants: ProductVariant[]; pageType: 'listing' | 'product' | 'unknown'; diagnostic?: string } {
   const fields = paths.fields;
 
   // Try products array first (listing page)
@@ -651,6 +716,17 @@ function extractFromData(
     for (const product of productsArray) {
       const productVariants = extractVariantsFromProduct(product, paths, fields);
       variants.push(...productVariants);
+    }
+    if (variants.length === 0) {
+      // Products array found but field extraction failed
+      const sampleKeys = productsArray[0] && typeof productsArray[0] === 'object'
+        ? Object.keys(productsArray[0]).slice(0, 10).join(', ')
+        : typeof productsArray[0];
+      return {
+        variants: [],
+        pageType: 'listing',
+        diagnostic: `Found ${productsArray.length} items at "${paths.productsArray}" but extracted 0 variants. Product keys: [${sampleKeys}]. Check field mappings (productId: "${fields.productId}").`,
+      };
     }
     return { variants, pageType: 'listing' };
   }
@@ -670,7 +746,19 @@ function extractFromData(
     return { variants: directVariants, pageType: 'product' };
   }
 
-  return { variants: [], pageType: 'unknown' };
+  // Nothing worked — build diagnostic
+  const resolved = resolvePath(data, paths.productsArray);
+  let detail: string;
+  if (resolved === undefined || resolved === null) {
+    const topKeys = data && typeof data === 'object' ? Object.keys(data).slice(0, 10).join(', ') : typeof data;
+    detail = `Path "${paths.productsArray}" resolved to ${resolved === undefined ? 'undefined' : 'null'}. Top-level keys: [${topKeys}].`;
+  } else if (Array.isArray(resolved) && resolved.length === 0) {
+    detail = `Path "${paths.productsArray}" resolved to an empty array.`;
+  } else {
+    detail = `Path "${paths.productsArray}" resolved to ${typeof resolved} (not an array).`;
+  }
+
+  return { variants: [], pageType: 'unknown', diagnostic: detail };
 }
 
 // Debug: global sample counter for variant price logging

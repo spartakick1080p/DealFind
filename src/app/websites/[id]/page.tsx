@@ -92,9 +92,29 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
                             </span>
                           </div>
                         )}
+                        {u.lastScrapeStatus === 'warning' && (
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <Badge color="yellow">Warning</Badge>
+                              <span className="text-xs text-base-content/50">
+                                {u.lastScrapeCount ?? 0} products
+                              </span>
+                            </div>
+                            {u.lastScrapeError && (
+                              <p className="text-[11px] text-yellow-400/80 mt-1 max-w-sm leading-snug break-words">
+                                {u.lastScrapeError}
+                              </p>
+                            )}
+                          </div>
+                        )}
                         {u.lastScrapeStatus === 'error' && (
-                          <div className="tooltip tooltip-error" data-tip={u.lastScrapeError ?? 'Unknown error'}>
-                            <Badge color="red" className="cursor-help">Error</Badge>
+                          <div>
+                            <Badge color="red">Error</Badge>
+                            {u.lastScrapeError && (
+                              <p className="text-[11px] text-red-400/80 mt-1 max-w-sm leading-snug break-words">
+                                {u.lastScrapeError}
+                              </p>
+                            )}
                           </div>
                         )}
                         {!u.lastScrapeStatus && (

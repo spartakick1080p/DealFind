@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { Badge } from './badge';
 import {
   Pagination,
@@ -26,6 +26,17 @@ interface ScrapeRun {
   errorMessage: string | null;
   startedAt: Date | string;
   completedAt: Date | string;
+}
+
+interface Deal {
+  id: string;
+  productName: string;
+  brand: string | null;
+  listPrice: string;
+  bestPrice: string;
+  discountPercentage: string;
+  imageUrl: string | null;
+  productUrl: string;
 }
 
 const PAGE_SIZE = 10;
@@ -66,6 +77,8 @@ export default function ScrapeHistoryTable({ initialHistory }: { initialHistory:
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [page, setPage] = useState(1);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [dealsMap, setDealsMap] = useState<Record<string, Deal[]>>({});
+  const [loadingDeals, setLoadingDeals] = useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(initialHistory.length / PAGE_SIZE));
   const paged = initialHistory.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -77,6 +90,30 @@ export default function ScrapeHistoryTable({ initialHistory }: { initialHistory:
     }, 30000);
     return () => { if (refreshRef.current) clearInterval(refreshRef.current); };
   }, [router]);
+
+  const handleRowClick = useCallback(async (run: ScrapeRun) => {
+    if (expandedId === run.id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(run.id);
+
+    // If we already fetched deals for this run, don't re-fetch
+    if (dealsMap[run.id]) return;
+
+    // Only fetch if there are deals to show
+    if (run.newDeals > 0) {
+      setLoadingDeals(run.id);
+      try {
+        const res = await fetch(`/api/scrape-runs/${run.id}/deals`);
+        if (res.ok) {
+          const data: Deal[] = await res.json();
+          setDealsMap((prev) => ({ ...prev, [run.id]: data }));
+        }
+      } catch { /* ignore */ }
+      setLoadingDeals(null);
+    }
+  }, [expandedId, dealsMap]);
 
   if (initialHistory.length === 0) {
     return (
@@ -126,8 +163,8 @@ export default function ScrapeHistoryTable({ initialHistory }: { initialHistory:
               {paged.map((run) => (
                 <tr
                   key={run.id}
-                  className="hover:bg-white/[0.02] transition-colors cursor-pointer"
-                  onClick={() => run.errorMessage ? setExpandedId(expandedId === run.id ? null : run.id) : undefined}
+                  className={`hover:bg-white/[0.02] transition-colors cursor-pointer ${expandedId === run.id ? 'bg-white/[0.03]' : ''}`}
+                  onClick={() => handleRowClick(run)}
                 >
                   <td className="px-4 py-3 text-gray-400 whitespace-nowrap">
                     {formatTime(run.startedAt)}
@@ -156,14 +193,83 @@ export default function ScrapeHistoryTable({ initialHistory }: { initialHistory:
           </table>
         </div>
 
-        {/* Error detail expansion */}
+        {/* Expanded detail panel */}
         {expandedId && (() => {
           const run = paged.find((r) => r.id === expandedId);
-          if (!run?.errorMessage) return null;
+          if (!run) return null;
+
+          const runDeals = dealsMap[run.id];
+          const isLoading = loadingDeals === run.id;
+          const hasError = !!run.errorMessage;
+          const hasDeals = run.newDeals > 0;
+
+          if (!hasError && !hasDeals) {
+            return (
+              <div className="border-t border-white/10 px-4 py-4 text-center">
+                <p className="text-xs text-gray-500">No deals found and no errors for this scrape.</p>
+              </div>
+            );
+          }
+
           return (
-            <div className="border-t border-white/10 px-4 py-3 bg-red-500/5">
-              <p className="text-xs text-red-400 font-medium mb-1">Error Details</p>
-              <p className="text-xs text-gray-400 whitespace-pre-wrap break-words font-mono">{run.errorMessage}</p>
+            <div className="border-t border-white/10">
+              {/* Error details */}
+              {hasError && (
+                <div className="px-4 py-3 bg-red-500/5">
+                  <p className="text-xs text-red-400 font-medium mb-1">Error Details</p>
+                  <p className="text-xs text-gray-400 whitespace-pre-wrap break-words font-mono">{run.errorMessage}</p>
+                </div>
+              )}
+
+              {/* Deals list */}
+              {hasDeals && (
+                <div className="px-4 py-3">
+                  <p className="text-xs text-orange-400 font-medium mb-2">
+                    Deals Found ({run.newDeals})
+                  </p>
+                  {isLoading && (
+                    <p className="text-xs text-gray-500">Loading deals…</p>
+                  )}
+                  {runDeals && runDeals.length === 0 && (
+                    <p className="text-xs text-gray-500">No deal records found for this time window.</p>
+                  )}
+                  {runDeals && runDeals.length > 0 && (
+                    <div className="grid gap-2">
+                      {runDeals.map((deal) => (
+                        <a
+                          key={deal.id}
+                          href={deal.productUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-3 rounded-lg bg-white/[0.03] border border-white/5 p-2.5 hover:bg-white/[0.06] transition-colors"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {deal.imageUrl && (
+                            <img
+                              src={deal.imageUrl}
+                              alt=""
+                              className="w-10 h-10 rounded object-cover bg-white/10 flex-shrink-0"
+                            />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-gray-200 truncate">{deal.productName}</p>
+                            {deal.brand && (
+                              <p className="text-[10px] text-gray-500">{deal.brand}</p>
+                            )}
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-xs text-gray-500 line-through">${deal.listPrice}</p>
+                            <p className="text-xs text-green-400 font-medium">${deal.bestPrice}</p>
+                          </div>
+                          <Badge color="orange" className="flex-shrink-0">
+                            -{deal.discountPercentage}%
+                          </Badge>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })()}
