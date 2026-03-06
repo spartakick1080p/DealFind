@@ -8,8 +8,8 @@
  */
 
 import { db } from '@/db';
-import { deals, filters, monitoredWebsites, productPageUrls, scrapeRuns } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { deals, filters, monitoredWebsites, productPageUrls, scrapeRuns, websiteFilters, urlFilters } from '@/db/schema';
+import { eq, and, inArray } from 'drizzle-orm';
 
 import { fetchWithRetry, fetchApiJson, interpolateEnvVars, type HttpClientConfig } from './http-client';
 import {
@@ -150,6 +150,52 @@ function toFilterWithId(row: {
     includedCategories: row.includedCategories ?? [],
     excludedCategories: row.excludedCategories ?? [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Internal: resolve effective filters for a URL
+// Priority: URL-level > website-level > all active filters
+// ---------------------------------------------------------------------------
+
+async function resolveFiltersForUrl(
+  urlId: string,
+  websiteId: string,
+  allActiveFilters: FilterWithId[],
+): Promise<FilterWithId[]> {
+  // 1. Check URL-level filter assignments
+  const urlFilterRows = await db
+    .select({ filterId: urlFilters.filterId })
+    .from(urlFilters)
+    .where(eq(urlFilters.urlId, urlId));
+
+  if (urlFilterRows.length > 0) {
+    const urlFilterIds = new Set(urlFilterRows.map((r) => r.filterId));
+    const resolved = allActiveFilters.filter((f) => urlFilterIds.has(f.id));
+    if (resolved.length > 0) {
+      console.log(`[scraper] URL ${urlId}: using ${resolved.length} URL-level filter(s)`);
+      return resolved;
+    }
+    // All assigned filters are inactive — fall through to website level
+  }
+
+  // 2. Check website-level filter assignments
+  const wsFilterRows = await db
+    .select({ filterId: websiteFilters.filterId })
+    .from(websiteFilters)
+    .where(eq(websiteFilters.websiteId, websiteId));
+
+  if (wsFilterRows.length > 0) {
+    const wsFilterIds = new Set(wsFilterRows.map((r) => r.filterId));
+    const resolved = allActiveFilters.filter((f) => wsFilterIds.has(f.id));
+    if (resolved.length > 0) {
+      console.log(`[scraper] URL ${urlId}: using ${resolved.length} website-level filter(s)`);
+      return resolved;
+    }
+    // All assigned filters are inactive — fall through to all
+  }
+
+  // 3. No assignments — use all active filters
+  return allActiveFilters;
 }
 
 // ---------------------------------------------------------------------------
@@ -1393,10 +1439,19 @@ export async function executeScrapeJob(
       }
       const before = counters.totalProducts;
       try {
+        // Resolve effective filters for this URL (URL-level > website-level > all)
+        const effectiveFilters = await resolveFiltersForUrl(urlRow.id, website.id, activeFilters);
+        if (effectiveFilters.length === 0) {
+          console.log(`[scraper] Skipping URL ${urlRow.url} — no active filters apply`);
+          pageProgress.completed += 1;
+          updateProgress({ currentPage: pageProgress.completed, totalPages: pageProgress.total });
+          continue;
+        }
+
         updateProgress({ currentWebsite: website.name });
         await processUrl(
           urlRow.url,
-          activeFilters,
+          effectiveFilters,
           httpConfig,
           maxPages,
           ttlDays,

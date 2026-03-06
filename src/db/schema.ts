@@ -129,3 +129,38 @@ export const scrapeRuns = pgTable('scrape_runs', {
 });
 
 
+
+export const websiteFilters = pgTable(
+  'website_filters',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    websiteId: uuid('website_id')
+      .references(() => monitoredWebsites.id, { onDelete: 'cascade' })
+      .notNull(),
+    filterId: uuid('filter_id')
+      .references(() => filters.id, { onDelete: 'cascade' })
+      .notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    uniquePair: uniqueIndex('unique_website_filter').on(table.websiteId, table.filterId),
+  })
+);
+
+export const urlFilters = pgTable(
+  'url_filters',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    urlId: uuid('url_id')
+      .references(() => productPageUrls.id, { onDelete: 'cascade' })
+      .notNull(),
+    filterId: uuid('filter_id')
+      .references(() => filters.id, { onDelete: 'cascade' })
+      .notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    uniquePair: uniqueIndex('unique_url_filter').on(table.urlId, table.filterId),
+  })
+);
+

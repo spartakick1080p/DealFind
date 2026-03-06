@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getWebsiteById } from '../actions';
 import { getUrlsByWebsite } from './actions';
+import { getAllFilters, getWebsiteFilterIds, getAllUrlFilterIdsForWebsite } from './filter-actions';
 import { productPageUrls } from '@/db/schema';
 import EditWebsiteForm from '@/components/edit-website-form';
 import AddUrlForm from '@/components/add-url-form';
@@ -10,6 +11,8 @@ import UrlNote from '@/components/url-note';
 import SchemaEditor from '@/components/schema-editor';
 import AuthTokenInput from '@/components/auth-token-input';
 import WebhookManager from '@/components/webhook-manager';
+import WebsiteFilterPicker from '@/components/website-filter-picker';
+import UrlFilterPicker from '@/components/url-filter-picker';
 import { Badge } from '@/components/badge';
 
 interface PageProps {
@@ -35,6 +38,24 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
     // Graceful fallback
   }
 
+  // Fetch filter data for pickers
+  let allFilters: { id: string; name: string; active: boolean }[] = [];
+  let websiteFilterIds: string[] = [];
+  let urlFilterMap: Record<string, string[]> = {};
+
+  try {
+    const [filtersResult, wsFilterResult, urlFilterResult] = await Promise.all([
+      getAllFilters(),
+      getWebsiteFilterIds(id),
+      getAllUrlFilterIdsForWebsite(id, urls.map((u) => u.id)),
+    ]);
+    if (filtersResult.success) allFilters = filtersResult.data;
+    if (wsFilterResult.success) websiteFilterIds = wsFilterResult.data;
+    if (urlFilterResult.success) urlFilterMap = urlFilterResult.data;
+  } catch {
+    // Graceful fallback
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -48,6 +69,22 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
       </div>
 
       <EditWebsiteForm website={website} />
+
+      {/* Website-level filter assignment */}
+      <div className="card bg-base-300 shadow-lg">
+        <div className="card-body p-5 gap-3">
+          <h2 className="card-title text-lg">Filters</h2>
+          <p className="text-xs text-base-content/50">
+            Assign filters to this website. URLs without their own filter override will use these.
+            If none are assigned, all active filters apply.
+          </p>
+          <WebsiteFilterPicker
+            websiteId={id}
+            filters={allFilters}
+            selectedIds={websiteFilterIds}
+          />
+        </div>
+      </div>
 
       {/* Product Page URLs */}
       <div className="card bg-base-300 shadow-lg">
@@ -63,13 +100,14 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
                   <tr>
                     <th>URL</th>
                     <th>Note</th>
+                    <th>Filters</th>
                     <th>Status</th>
                     <th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {urls.map((u) => (
-                    <tr key={u.id} className="hover">
+                    <tr key={u.id} className="hover align-top">
                       <td className="text-sm text-base-content/70 max-w-md truncate">
                         <a
                           href={u.url}
@@ -82,6 +120,14 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
                       </td>
                       <td>
                         <UrlNote urlId={u.id} initialNote={u.note} />
+                      </td>
+                      <td>
+                        <UrlFilterPicker
+                          urlId={u.id}
+                          websiteId={id}
+                          filters={allFilters}
+                          selectedIds={urlFilterMap[u.id] ?? []}
+                        />
                       </td>
                       <td>
                         {u.lastScrapeStatus === 'ok' && (
