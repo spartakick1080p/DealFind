@@ -1379,7 +1379,7 @@ export async function executeScrapeJob(
     const urls = await db
       .select()
       .from(productPageUrls)
-      .where(eq(productPageUrls.websiteId, website.id));
+      .where(and(eq(productPageUrls.websiteId, website.id), eq(productPageUrls.active, true)));
 
     websiteContexts.push({ website, customSchema, schemaError, authToken, urls: urls as { id: string; url: string; websiteId: string }[] });
   }

@@ -8,6 +8,7 @@ import EditWebsiteForm from '@/components/edit-website-form';
 import AddUrlForm from '@/components/add-url-form';
 import RemoveUrlButton from '@/components/remove-url-button';
 import UrlNote from '@/components/url-note';
+import UrlActiveToggle from '@/components/url-active-toggle';
 import SchemaEditor from '@/components/schema-editor';
 import AuthTokenInput from '@/components/auth-token-input';
 import WebhookManager from '@/components/webhook-manager';
@@ -98,6 +99,7 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
               <table className="table">
                 <thead>
                   <tr>
+                    <th>Enabled</th>
                     <th>URL</th>
                     <th>Note</th>
                     <th>Filters</th>
@@ -107,7 +109,10 @@ export default async function WebsiteDetailPage({ params }: PageProps) {
                 </thead>
                 <tbody>
                   {urls.map((u) => (
-                    <tr key={u.id} className="hover align-top">
+                    <tr key={u.id} className={`hover align-top ${!u.active ? 'opacity-50' : ''}`}>
+                      <td>
+                        <UrlActiveToggle urlId={u.id} active={u.active} />
+                      </td>
                       <td className="text-sm text-base-content/70 max-w-md truncate">
                         <a
                           href={u.url}

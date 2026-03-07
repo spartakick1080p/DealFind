@@ -102,6 +102,28 @@ export async function removeUrl(
     return { success: false, error: 'Failed to remove URL' };
   }
 }
+
+export async function toggleUrlActive(
+  urlId: string,
+  active: boolean
+): Promise<ActionResult> {
+  try {
+    const [updated] = await db
+      .update(productPageUrls)
+      .set({ active })
+      .where(eq(productPageUrls.id, urlId))
+      .returning({ id: productPageUrls.id, websiteId: productPageUrls.websiteId });
+
+    if (!updated) {
+      return { success: false, error: 'URL not found' };
+    }
+
+    revalidatePath(`/websites/${updated.websiteId}`);
+    return { success: true, data: undefined };
+  } catch {
+    return { success: false, error: 'Failed to update URL' };
+  }
+}
 export async function updateUrlNote(
   urlId: string,
   note: string

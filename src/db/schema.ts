@@ -30,6 +30,7 @@ export const productPageUrls = pgTable(
       .references(() => monitoredWebsites.id, { onDelete: 'cascade' })
       .notNull(),
     url: varchar('url', { length: 2048 }).notNull(),
+    active: boolean('active').default(true).notNull(),
     lastScrapeStatus: varchar('last_scrape_status', { length: 16 }),  // 'ok' | 'error' | null
     lastScrapeError: text('last_scrape_error'),
     lastScrapeCount: integer('last_scrape_count'),
