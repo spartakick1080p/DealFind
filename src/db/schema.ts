@@ -10,17 +10,73 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
-export const monitoredWebsites = pgTable('monitored_websites', {
+// Better Auth tables
+export const user = pgTable('user', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: varchar('name', { length: 255 }).notNull(),
-  baseUrl: varchar('base_url', { length: 2048 }).notNull().unique(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  emailVerified: boolean('emailVerified').notNull().default(false),
+  image: text('image'),
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+});
+
+export const session = pgTable('session', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  expiresAt: timestamp('expiresAt').notNull(),
+  token: text('token').notNull().unique(),
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+  ipAddress: text('ipAddress'),
+  userAgent: text('userAgent'),
+  userId: uuid('userId')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
+});
+
+export const account = pgTable('account', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  accountId: text('accountId').notNull(),
+  providerId: text('providerId').notNull(),
+  userId: uuid('userId')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  accessToken: text('accessToken'),
+  refreshToken: text('refreshToken'),
+  idToken: text('idToken'),
+  accessTokenExpiresAt: timestamp('accessTokenExpiresAt'),
+  refreshTokenExpiresAt: timestamp('refreshTokenExpiresAt'),
+  scope: text('scope'),
+  password: text('password'),
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+});
+
+export const verification = pgTable('verification', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  identifier: text('identifier').notNull(),
+  value: text('value').notNull(),
+  expiresAt: timestamp('expiresAt').notNull(),
+  createdAt: timestamp('createdAt').defaultNow(),
+  updatedAt: timestamp('updatedAt').defaultNow(),
+});
+
+export const monitoredWebsites = pgTable('monitored_websites', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .references(() => user.id, { onDelete: 'cascade' })
+    .notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  baseUrl: varchar('base_url', { length: 2048 }).notNull(),
   active: boolean('active').default(true).notNull(),
   productSchema: text('product_schema'),
   authToken: text('auth_token'),
   scrapeInterval: varchar('scrape_interval', { length: 64 }).default('0 8 * * *').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+}, (table) => ({
+  uniqueUserUrl: uniqueIndex('unique_user_base_url').on(table.userId, table.baseUrl),
+}));
 
 export const productPageUrls = pgTable(
   'product_page_urls',
@@ -48,6 +104,9 @@ export const productPageUrls = pgTable(
 
 export const filters = pgTable('filters', {
   id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .references(() => user.id, { onDelete: 'cascade' })
+    .notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   discountThreshold: integer('discount_threshold').notNull(),
   maxPrice: numeric('max_price', { precision: 10, scale: 2 }),
@@ -61,6 +120,9 @@ export const filters = pgTable('filters', {
 
 export const deals = pgTable('deals', {
   id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .references(() => user.id, { onDelete: 'cascade' })
+    .notNull(),
   productId: varchar('product_id', { length: 255 }).notNull(),
   skuId: varchar('sku_id', { length: 255 }),
   productName: varchar('product_name', { length: 512 }).notNull(),

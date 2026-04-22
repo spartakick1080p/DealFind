@@ -15,6 +15,13 @@
       "when": 1771526456884,
       "tag": "0001_dashing_starfox",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776890681013,
+      "tag": "0002_purple_adam_warlock",
+      "breakpoints": true
     }
   ]
 }
