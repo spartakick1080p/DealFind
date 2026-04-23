@@ -12,7 +12,7 @@ import {
 
 // Better Auth tables
 export const user = pgTable('user', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: text('id').primaryKey(),
   name: varchar('name', { length: 255 }).notNull(),
   email: varchar('email', { length: 255 }).notNull().unique(),
   emailVerified: boolean('emailVerified').notNull().default(false),
@@ -22,23 +22,23 @@ export const user = pgTable('user', {
 });
 
 export const session = pgTable('session', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: text('id').primaryKey(),
   expiresAt: timestamp('expiresAt').notNull(),
   token: text('token').notNull().unique(),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   updatedAt: timestamp('updatedAt').notNull().defaultNow(),
   ipAddress: text('ipAddress'),
   userAgent: text('userAgent'),
-  userId: uuid('userId')
+  userId: text('userId')
     .notNull()
     .references(() => user.id, { onDelete: 'cascade' }),
 });
 
 export const account = pgTable('account', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: text('id').primaryKey(),
   accountId: text('accountId').notNull(),
   providerId: text('providerId').notNull(),
-  userId: uuid('userId')
+  userId: text('userId')
     .notNull()
     .references(() => user.id, { onDelete: 'cascade' }),
   accessToken: text('accessToken'),
@@ -53,7 +53,7 @@ export const account = pgTable('account', {
 });
 
 export const verification = pgTable('verification', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: text('id').primaryKey(),
   identifier: text('identifier').notNull(),
   value: text('value').notNull(),
   expiresAt: timestamp('expiresAt').notNull(),
@@ -63,7 +63,7 @@ export const verification = pgTable('verification', {
 
 export const monitoredWebsites = pgTable('monitored_websites', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id')
+  userId: text('user_id')
     .references(() => user.id, { onDelete: 'cascade' })
     .notNull(),
   name: varchar('name', { length: 255 }).notNull(),
@@ -104,7 +104,7 @@ export const productPageUrls = pgTable(
 
 export const filters = pgTable('filters', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id')
+  userId: text('user_id')
     .references(() => user.id, { onDelete: 'cascade' })
     .notNull(),
   name: varchar('name', { length: 255 }).notNull(),
@@ -120,7 +120,7 @@ export const filters = pgTable('filters', {
 
 export const deals = pgTable('deals', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id')
+  userId: text('user_id')
     .references(() => user.id, { onDelete: 'cascade' })
     .notNull(),
   productId: varchar('product_id', { length: 255 }).notNull(),
@@ -142,7 +142,7 @@ export const deals = pgTable('deals', {
 
 export const seenItems = pgTable('seen_items', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id')
+  userId: text('user_id')
     .references(() => user.id, { onDelete: 'cascade' }),
   compositeId: varchar('composite_id', { length: 512 }).notNull(),
   expiresAt: timestamp('expires_at').notNull(),
@@ -152,7 +152,7 @@ export const seenItems = pgTable('seen_items', {
 
 export const notifications = pgTable('notifications', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id')
+  userId: text('user_id')
     .references(() => user.id, { onDelete: 'cascade' }),
   dealId: uuid('deal_id')
     .references(() => deals.id, { onDelete: 'cascade' })
@@ -164,7 +164,7 @@ export const notifications = pgTable('notifications', {
 
 export const purchases = pgTable('purchases', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id')
+  userId: text('user_id')
     .references(() => user.id, { onDelete: 'cascade' }),
   dealId: uuid('deal_id')
     .references(() => deals.id)
@@ -186,7 +186,7 @@ export const webhooks = pgTable('webhooks', {
 
 export const scrapeRuns = pgTable('scrape_runs', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id')
+  userId: text('user_id')
     .references(() => user.id, { onDelete: 'cascade' }),
   websiteId: uuid('website_id').references(() => monitoredWebsites.id, { onDelete: 'set null' }),
   websiteName: varchar('website_name', { length: 255 }).notNull(),
