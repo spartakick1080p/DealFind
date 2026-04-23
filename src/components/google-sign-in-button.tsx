@@ -14,7 +14,7 @@ export default function GoogleSignInButton() {
         setLoading(true);
         await signIn.social({
           provider: 'google',
-          callbackURL: '/websites',
+          callbackURL: '/',
         });
       }}
       className="flex w-full items-center justify-center gap-3 rounded-lg border border-white/10 bg-[#0a0a0a] px-4 py-2.5 text-sm font-medium text-gray-300 hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-[#1a1a1a] disabled:opacity-50 transition-colors"

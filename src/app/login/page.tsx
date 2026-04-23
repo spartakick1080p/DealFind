@@ -20,7 +20,7 @@ export default function LoginPage() {
 
     try {
       await signIn.email({ email, password });
-      router.push("/websites");
+      router.push("/");
     } catch {
       setError("Invalid email or password");
     } finally {
