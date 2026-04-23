@@ -42,12 +42,14 @@ export async function createNotification(dealId: string): Promise<void> {
 /**
  * Get the count of unread, non-dismissed notifications.
  */
-export async function getUnreadCount(): Promise<number> {
+export async function getUnreadCount(userId: string): Promise<number> {
   const result = await db
     .select({ value: count() })
     .from(notifications)
+    .innerJoin(deals, eq(notifications.dealId, deals.id))
     .where(
       and(
+        eq(deals.userId, userId),
         eq(notifications.read, false),
         eq(notifications.dismissed, false)
       )
@@ -60,7 +62,7 @@ export async function getUnreadCount(): Promise<number> {
  * Get all active (non-dismissed) notifications with their associated deal data,
  * ordered by creation date descending (newest first).
  */
-export async function getActiveNotifications(): Promise<NotificationWithDeal[]> {
+export async function getActiveNotifications(userId: string): Promise<NotificationWithDeal[]> {
   const rows = await db
     .select({
       id: notifications.id,
@@ -83,7 +85,7 @@ export async function getActiveNotifications(): Promise<NotificationWithDeal[]> 
     .from(notifications)
     .innerJoin(deals, eq(notifications.dealId, deals.id))
     .leftJoin(filters, eq(deals.filterId, filters.id))
-    .where(eq(notifications.dismissed, false))
+    .where(and(eq(notifications.dismissed, false), eq(deals.userId, userId)))
     .orderBy(desc(notifications.createdAt));
 
   return rows;

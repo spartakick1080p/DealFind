@@ -7,7 +7,7 @@
 
 import { db } from '@/db';
 import { deals, purchases } from '@/db/schema';
-import { count, desc, sql } from 'drizzle-orm';
+import { count, desc, eq, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 
 export interface DashboardMetrics {
@@ -23,21 +23,25 @@ export interface DashboardMetrics {
  * - totalItemsPurchased: count of all rows in the purchases table
  * - totalDollarsSaved: sum of (listPrice - bestPrice) for all deals that have a purchase record
  */
-export async function getDashboardMetrics(): Promise<DashboardMetrics> {
+export async function getDashboardMetrics(userId: string): Promise<DashboardMetrics> {
   const [dealsCount] = await db
     .select({ value: count() })
-    .from(deals);
+    .from(deals)
+    .where(eq(deals.userId, userId));
 
   const [purchasesCount] = await db
     .select({ value: count() })
-    .from(purchases);
+    .from(purchases)
+    .innerJoin(deals, sql`${purchases.dealId} = ${deals.id}`)
+    .where(eq(deals.userId, userId));
 
   const [savingsResult] = await db
     .select({
       value: sql<string>`coalesce(sum(${deals.listPrice} - ${deals.bestPrice}), 0)`,
     })
     .from(purchases)
-    .innerJoin(deals, sql`${purchases.dealId} = ${deals.id}`);
+    .innerJoin(deals, sql`${purchases.dealId} = ${deals.id}`)
+    .where(eq(deals.userId, userId));
 
   return {
     totalDealsFound: dealsCount?.value ?? 0,
@@ -49,10 +53,11 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
 /**
  * Get the most recent deals, ordered by foundAt descending.
  */
-export async function getRecentDeals(limit: number) {
+export async function getRecentDeals(userId: string, limit: number) {
   return db
     .select()
     .from(deals)
+    .where(eq(deals.userId, userId))
     .orderBy(desc(deals.foundAt))
     .limit(limit);
 }
@@ -74,9 +79,14 @@ export async function markAsPurchased(dealId: string, actualPrice: number): Prom
  * Delete all deals (and related purchases / notifications) to clear the dashboard.
  * Revalidates the dashboard after deletion.
  */
-export async function clearAllDeals(): Promise<void> {
-  await db.delete(purchases);
-  await db.delete(deals);
+export async function clearAllDeals(userId: string): Promise<void> {
+  // Delete purchases for this user's deals, then deals
+  const userDeals = await db.select({ id: deals.id }).from(deals).where(eq(deals.userId, userId));
+  if (userDeals.length > 0) {
+    const dealIds = userDeals.map(d => d.id);
+    await db.delete(purchases).where(sql`${purchases.dealId} IN (${sql.join(dealIds.map(id => sql`${id}`), sql`, `)})`);
+    await db.delete(deals).where(eq(deals.userId, userId));
+  }
   revalidatePath('/');
 }
 

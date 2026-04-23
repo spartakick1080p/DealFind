@@ -1,9 +1,10 @@
 'use server';
 
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { db } from '@/db';
 import { filters } from '@/db/schema';
+import { getUserId } from '@/lib/auth-server';
 
 type ActionResult<T = void> =
   | { success: true; data: T }
@@ -52,9 +53,11 @@ export async function createFilter(data: {
   }
 
   try {
+    const userId = await getUserId();
     const [filter] = await db
       .insert(filters)
       .values({
+        userId,
         name: trimmedName,
         discountThreshold: data.discountThreshold,
         maxPrice: data.maxPrice != null ? String(data.maxPrice) : null,
@@ -104,6 +107,7 @@ export async function updateFilter(
   }
 
   try {
+    const userId = await getUserId();
     const updateValues: Record<string, unknown> = {
       updatedAt: new Date(),
     };
@@ -118,7 +122,7 @@ export async function updateFilter(
     const [filter] = await db
       .update(filters)
       .set(updateValues)
-      .where(eq(filters.id, id))
+      .where(and(eq(filters.id, id), eq(filters.userId, userId)))
       .returning();
 
     if (!filter) {
@@ -136,9 +140,10 @@ export async function deleteFilter(
   id: string
 ): Promise<ActionResult> {
   try {
+    const userId = await getUserId();
     const [deleted] = await db
       .delete(filters)
-      .where(eq(filters.id, id))
+      .where(and(eq(filters.id, id), eq(filters.userId, userId)))
       .returning({ id: filters.id });
 
     if (!deleted) {
@@ -156,9 +161,11 @@ export async function getFilters(): Promise<
   ActionResult<(typeof filters.$inferSelect)[]>
 > {
   try {
+    const userId = await getUserId();
     const allFilters = await db
       .select()
       .from(filters)
+      .where(eq(filters.userId, userId))
       .orderBy(desc(filters.createdAt));
 
     return { success: true, data: allFilters };
@@ -171,10 +178,11 @@ export async function getFilterById(
   id: string
 ): Promise<ActionResult<typeof filters.$inferSelect | null>> {
   try {
+    const userId = await getUserId();
     const [filter] = await db
       .select()
       .from(filters)
-      .where(eq(filters.id, id));
+      .where(and(eq(filters.id, id), eq(filters.userId, userId)));
 
     return { success: true, data: filter ?? null };
   } catch {

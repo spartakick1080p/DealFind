@@ -30,19 +30,21 @@ export async function GET(request: Request) {
       ?? request.headers.get('x-website-id')
       ?? undefined;
 
-    // Resolve website name for display
+    // Resolve website name and owner for display
     let websiteName: string | undefined;
+    let websiteUserId: string | undefined;
     if (websiteId) {
       const rows = await db
-        .select({ name: monitoredWebsites.name })
+        .select({ name: monitoredWebsites.name, userId: monitoredWebsites.userId })
         .from(monitoredWebsites)
         .where(eq(monitoredWebsites.id, websiteId))
         .limit(1);
       websiteName = rows[0]?.name;
+      websiteUserId = rows[0]?.userId;
     }
 
     const jobId = createJob(websiteName, undefined, 'scheduled');
-    const result = await executeScrapeJob(undefined, undefined, undefined, websiteId, undefined, jobId);
+    const result = await executeScrapeJob(undefined, undefined, undefined, websiteId, undefined, jobId, websiteUserId);
     return NextResponse.json(result);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

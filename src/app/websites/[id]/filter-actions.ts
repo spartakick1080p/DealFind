@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { db } from '@/db';
 import { websiteFilters, urlFilters, filters } from '@/db/schema';
+import { getUserId } from '@/lib/auth-server';
 
 type ActionResult<T = void> =
   | { success: true; data: T }
@@ -96,9 +97,11 @@ export async function getAllFilters(): Promise<
   ActionResult<{ id: string; name: string; active: boolean }[]>
 > {
   try {
+    const userId = await getUserId();
     const allFilters = await db
       .select({ id: filters.id, name: filters.name, active: filters.active })
-      .from(filters);
+      .from(filters)
+      .where(eq(filters.userId, userId));
 
     return { success: true, data: allFilters };
   } catch {

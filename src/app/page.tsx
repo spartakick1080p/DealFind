@@ -1,4 +1,5 @@
 import { getDashboardMetrics, getRecentDeals, markAsPurchased, clearAllDeals } from '@/lib/metrics-service';
+import { getUserId } from '@/lib/auth-server';
 import PurchaseButton from '@/components/purchase-button';
 import ClearDealsButton from '@/components/clear-deals-button';
 import Image from 'next/image';
@@ -10,17 +11,19 @@ async function handlePurchase(dealId: string, actualPrice: number) {
 
 async function handleClearDeals() {
   'use server';
-  await clearAllDeals();
+  const userId = await getUserId();
+  await clearAllDeals(userId);
 }
 
 export default async function DashboardPage() {
+  const userId = await getUserId();
   let metrics = { totalDealsFound: 0, totalItemsPurchased: 0, totalDollarsSaved: 0 };
   let recentDeals: Awaited<ReturnType<typeof getRecentDeals>> = [];
 
   try {
     [metrics, recentDeals] = await Promise.all([
-      getDashboardMetrics(),
-      getRecentDeals(20),
+      getDashboardMetrics(userId),
+      getRecentDeals(userId, 20),
     ]);
   } catch {
     // Graceful fallback when DB is unavailable

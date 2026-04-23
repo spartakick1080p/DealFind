@@ -1,10 +1,11 @@
 'use server';
 
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { db } from '@/db';
 import { monitoredWebsites } from '@/db/schema';
 import { upsertSchedule, deleteSchedule } from '@/lib/scheduler';
+import { getUserId } from '@/lib/auth-server';
 
 type ActionResult<T = void> =
   | { success: true; data: T }
@@ -25,9 +26,10 @@ export async function createWebsite(
   }
 
   try {
+    const userId = await getUserId();
     const [website] = await db
       .insert(monitoredWebsites)
-      .values({ name: trimmedName, baseUrl: trimmedUrl })
+      .values({ userId, name: trimmedName, baseUrl: trimmedUrl })
       .returning();
 
     // Sync EventBridge schedule
@@ -65,6 +67,7 @@ export async function updateWebsite(
   }
 
   try {
+    const userId = await getUserId();
     const updateValues: Record<string, unknown> = {
       updatedAt: new Date(),
     };
@@ -76,7 +79,7 @@ export async function updateWebsite(
     const [website] = await db
       .update(monitoredWebsites)
       .set(updateValues)
-      .where(eq(monitoredWebsites.id, id))
+      .where(and(eq(monitoredWebsites.id, id), eq(monitoredWebsites.userId, userId)))
       .returning();
 
     if (!website) {
@@ -110,9 +113,10 @@ export async function deleteWebsite(
   id: string
 ): Promise<ActionResult> {
   try {
+    const userId = await getUserId();
     const [deleted] = await db
       .delete(monitoredWebsites)
-      .where(eq(monitoredWebsites.id, id))
+      .where(and(eq(monitoredWebsites.id, id), eq(monitoredWebsites.userId, userId)))
       .returning({ id: monitoredWebsites.id });
 
     if (!deleted) {
@@ -137,9 +141,11 @@ export async function getWebsites(): Promise<
   ActionResult<(typeof monitoredWebsites.$inferSelect)[]>
 > {
   try {
+    const userId = await getUserId();
     const websites = await db
       .select()
       .from(monitoredWebsites)
+      .where(eq(monitoredWebsites.userId, userId))
       .orderBy(desc(monitoredWebsites.createdAt));
 
     return { success: true, data: websites };
@@ -152,10 +158,11 @@ export async function getWebsiteById(
   id: string
 ): Promise<ActionResult<typeof monitoredWebsites.$inferSelect | null>> {
   try {
+    const userId = await getUserId();
     const [website] = await db
       .select()
       .from(monitoredWebsites)
-      .where(eq(monitoredWebsites.id, id));
+      .where(and(eq(monitoredWebsites.id, id), eq(monitoredWebsites.userId, userId)));
 
     return { success: true, data: website ?? null };
   } catch {

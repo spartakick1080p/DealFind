@@ -219,6 +219,7 @@ async function processUrl(
   onBatchReady?: () => Promise<void>,
   websiteName?: string,
   diagnostics?: Map<string, string>,
+  userId?: string,
 ): Promise<void> {
   // If a custom schema is provided, use the schema-driven parser
   if (customSchema) {
@@ -242,7 +243,7 @@ async function processUrl(
         // Paginated API fetching
         await fetchApiWithPagination(
           customSchema, mergedParams, pagination, authToken,
-          url, maxPages, activeFilters, ttlDays, result, errors, pageProgress, seenIds, baseUrl, webhookDeals, onBatchReady, websiteName,
+          url, maxPages, activeFilters, ttlDays, result, errors, pageProgress, seenIds, baseUrl, webhookDeals, onBatchReady, websiteName, userId,
         );
       } else {
         // Single-page API fetch (no pagination)
@@ -271,7 +272,7 @@ async function processUrl(
             if (seenIds.has(variant.productId)) continue;
             seenIds.add(variant.productId);
           }
-          await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName);
+          await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName, undefined, userId);
         }
         pageProgress.completed += 1;
         updateProgress({ currentPage: pageProgress.completed, totalPages: pageProgress.total, totalProducts: result.totalProducts, newDeals: result.newDeals, uniqueProducts: getUniqueProductCount() });
@@ -536,7 +537,7 @@ async function processUrl(
         seenIds.add(variant.productId);
       }
       await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName,
-        fetchHeaders ? { httpConfig, fetchHeaders } : undefined);
+        fetchHeaders ? { httpConfig, fetchHeaders } : undefined, userId);
     }
     pageProgress.completed += 1;
     updateProgress({ currentPage: pageProgress.completed, totalPages: pageProgress.total, totalProducts: result.totalProducts, newDeals: result.newDeals, uniqueProducts: getUniqueProductCount() });
@@ -602,7 +603,7 @@ async function processUrl(
       if (seenIds.has(variant.productId)) continue;
       seenIds.add(variant.productId);
     }
-    await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName);
+    await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName, undefined, userId);
   }
 
   pageProgress.completed += 1;
@@ -709,6 +710,7 @@ async function fetchApiWithPagination(
   webhookDeals?: DealPayload[],
   onBatchReady?: () => Promise<void>,
   websiteName?: string,
+  userId?: string,
 ): Promise<void> {
   const pageSize = pagination.pageSize ?? 120;
   const totalPath = pagination.totalPath ?? 'total';
@@ -808,7 +810,7 @@ async function fetchApiWithPagination(
       if (seenIds.has(variant.productId)) continue;
       seenIds.add(variant.productId);
     }
-    await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName);
+    await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName, undefined, userId);
   }
 
   // --- Determine pagination strategy ---
@@ -886,7 +888,7 @@ async function fetchApiWithPagination(
             if (seenIds.has(variant.productId)) continue;
             seenIds.add(variant.productId);
           }
-          await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName);
+          await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName, undefined, userId);
         }
         batchNewDeals += result.newDeals - dealsBefore;
       }
@@ -958,7 +960,7 @@ async function fetchApiWithPagination(
           if (seenIds.has(variant.productId)) continue;
           seenIds.add(variant.productId);
         }
-        await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName);
+        await evaluateAndPersist(variant, activeFilters, ttlDays, result, baseUrl, webhookDeals, onBatchReady, websiteName, undefined, userId);
       }
 
       pagesCompleted++;
@@ -1032,6 +1034,7 @@ async function evaluateAndPersist(
   onBatchReady?: () => Promise<void>,
   websiteName?: string,
   verifyOptions?: { httpConfig: HttpClientConfig; fetchHeaders?: Record<string, string> },
+  userId?: string,
 ): Promise<void> {
   const matchingFilters = findMatchingFilters(variant, activeFilters);
   if (matchingFilters.length === 0) {
@@ -1123,6 +1126,7 @@ async function evaluateAndPersist(
   const [deal] = await db
     .insert(deals)
     .values({
+      userId: userId!,
       productId: variant.productId,
       skuId: variant.skuId,
       productName: variant.displayName,
@@ -1264,6 +1268,7 @@ export async function executeScrapeJob(
   websiteId?: string,
   filterId?: string,
   jobId?: string,
+  userId?: string,
 ): Promise<ScrapeResult> {
   // Set the module-level job ID so all internal helpers use it
   _currentJobId = jobId || '';
@@ -1466,6 +1471,7 @@ export async function executeScrapeJob(
           flushWebhookBatch,
           website.name,
           urlDiagnostics,
+          userId,
         );
 
         // Check if this URL produced any errors during processUrl
@@ -1539,6 +1545,7 @@ export async function executeScrapeJob(
     const status = wasCancelled ? 'cancelled' : errors.length > 0 ? 'error' : 'completed';
     const websiteNames = websites.map(w => w.name).join(', ');
     await db.insert(scrapeRuns).values({
+      userId: userId ?? null,
       websiteId: websites.length === 1 ? websites[0].id : null,
       websiteName: websiteNames || 'Unknown',
       status,

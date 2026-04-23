@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Suspense } from "react";
-import SidebarNav from "@/components/sidebar-nav";
+import AppShell from "@/components/app-shell";
 import NavBadge from "@/components/nav-badge";
 import "./globals.css";
 
@@ -52,18 +52,15 @@ export default function RootLayout({
             __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'))}`,
           }}
         />
-        <div className="flex min-h-screen">
-          <SidebarNav
-            notificationBadge={
-              <Suspense fallback={null}>
-                <NavBadge />
-              </Suspense>
-            }
-          />
-          <main className="flex-1 p-4 md:p-8 overflow-y-auto pb-20 md:pb-8 bg-[#121212]">
-            {children}
-          </main>
-        </div>
+        <AppShell
+          notificationBadge={
+            <Suspense fallback={null}>
+              <NavBadge />
+            </Suspense>
+          }
+        >
+          {children}
+        </AppShell>
       </body>
     </html>
   );

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { signUp } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import GoogleSignInButton from "@/components/google-sign-in-button";
 
 export default function SignupPage() {
   const [name, setName] = useState("");
@@ -19,11 +20,7 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      await signUp.email({
-        email,
-        password,
-        name,
-      });
+      await signUp.email({ email, password, name });
       router.push("/websites");
     } catch (err: any) {
       setError(err?.message || "Failed to create account");
@@ -33,86 +30,94 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-900">
-      <div className="w-full max-w-md space-y-8 rounded-lg bg-white p-8 shadow-lg dark:bg-zinc-800">
-        <div>
-          <h2 className="text-center text-3xl font-bold tracking-tight text-zinc-900 dark:text-white">
-            Create your account
-          </h2>
+    <div className="flex min-h-screen items-center justify-center bg-[#0a0a0a]">
+      <div className="w-full max-w-md space-y-8 rounded-xl bg-[#1a1a1a] border border-white/10 p-8">
+        <div className="text-center">
+          <span className="text-orange-500 text-2xl font-bold tracking-tight">Deal</span>
+          <span className="text-gray-300 text-2xl font-light tracking-tight">Monitor</span>
+          <p className="mt-2 text-sm text-gray-500">Create your account</p>
         </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+
+        <GoogleSignInButton />
+
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-white/10" />
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="bg-[#1a1a1a] px-2 text-gray-500">or continue with email</span>
+          </div>
+        </div>
+
+        <form className="space-y-4" onSubmit={handleSubmit}>
           {error && (
-            <div className="rounded-md bg-red-50 p-4 text-sm text-red-800 dark:bg-red-900/20 dark:text-red-400">
+            <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-400">
               {error}
             </div>
           )}
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="name" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                Full name
-              </label>
-              <input
-                id="name"
-                name="name"
-                type="text"
-                autoComplete="name"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 placeholder-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-700 dark:text-white"
-              />
-            </div>
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                Email address
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 placeholder-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-700 dark:text-white"
-              />
-            </div>
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                Password
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="new-password"
-                required
-                minLength={8}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 placeholder-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-700 dark:text-white"
-              />
-              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                Must be at least 8 characters
-              </p>
-            </div>
+          <div>
+            <label htmlFor="name" className="block text-sm font-medium text-gray-400 mb-1">
+              Full name
+            </label>
+            <input
+              id="name"
+              name="name"
+              type="text"
+              autoComplete="name"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="block w-full rounded-lg border border-white/10 bg-[#0a0a0a] px-3 py-2 text-gray-200 placeholder-gray-600 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+            />
+          </div>
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-400 mb-1">
+              Email address
+            </label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="block w-full rounded-lg border border-white/10 bg-[#0a0a0a] px-3 py-2 text-gray-200 placeholder-gray-600 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+            />
+          </div>
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-gray-400 mb-1">
+              Password
+            </label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={8}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="block w-full rounded-lg border border-white/10 bg-[#0a0a0a] px-3 py-2 text-gray-200 placeholder-gray-600 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+            />
+            <p className="mt-1 text-xs text-gray-600">Must be at least 8 characters</p>
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
+            className="w-full rounded-lg bg-orange-500 px-4 py-2.5 text-sm font-semibold text-black hover:bg-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-[#1a1a1a] disabled:opacity-50 transition-colors"
           >
             {loading ? "Creating account..." : "Sign up"}
           </button>
-
-          <p className="text-center text-sm text-zinc-600 dark:text-zinc-400">
-            Already have an account?{" "}
-            <Link href="/login" className="font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400">
-              Sign in
-            </Link>
-          </p>
         </form>
+
+        <p className="text-center text-sm text-gray-500">
+          Already have an account?{" "}
+          <Link href="/login" className="font-medium text-orange-500 hover:text-orange-400">
+            Sign in
+          </Link>
+        </p>
       </div>
     </div>
   );

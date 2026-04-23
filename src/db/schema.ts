@@ -142,12 +142,18 @@ export const deals = pgTable('deals', {
 
 export const seenItems = pgTable('seen_items', {
   id: uuid('id').defaultRandom().primaryKey(),
-  compositeId: varchar('composite_id', { length: 512 }).notNull().unique(),
+  userId: uuid('user_id')
+    .references(() => user.id, { onDelete: 'cascade' }),
+  compositeId: varchar('composite_id', { length: 512 }).notNull(),
   expiresAt: timestamp('expires_at').notNull(),
-});
+}, (table) => ({
+  uniqueUserComposite: uniqueIndex('seen_items_user_composite_unique').on(table.userId, table.compositeId),
+}));
 
 export const notifications = pgTable('notifications', {
   id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .references(() => user.id, { onDelete: 'cascade' }),
   dealId: uuid('deal_id')
     .references(() => deals.id, { onDelete: 'cascade' })
     .notNull(),
@@ -158,6 +164,8 @@ export const notifications = pgTable('notifications', {
 
 export const purchases = pgTable('purchases', {
   id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .references(() => user.id, { onDelete: 'cascade' }),
   dealId: uuid('deal_id')
     .references(() => deals.id)
     .notNull(),
@@ -178,6 +186,8 @@ export const webhooks = pgTable('webhooks', {
 
 export const scrapeRuns = pgTable('scrape_runs', {
   id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .references(() => user.id, { onDelete: 'cascade' }),
   websiteId: uuid('website_id').references(() => monitoredWebsites.id, { onDelete: 'set null' }),
   websiteName: varchar('website_name', { length: 255 }).notNull(),
   status: varchar('status', { length: 32 }).notNull(), // 'completed' | 'error' | 'cancelled'

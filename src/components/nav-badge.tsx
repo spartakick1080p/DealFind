@@ -1,11 +1,14 @@
 import { getUnreadCount } from '@/lib/notification-service';
+import { getSession } from '@/lib/auth-server';
 
 export default async function NavBadge() {
   let count = 0;
   try {
-    count = await getUnreadCount();
+    const session = await getSession();
+    if (session) {
+      count = await getUnreadCount(session.user.id);
+    }
   } catch {
-    // Graceful fallback if database is unavailable
     count = 0;
   }
 

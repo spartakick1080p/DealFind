@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Suspense, type ReactNode } from 'react';
+import { signOut, useSession } from '@/lib/auth-client';
 
 interface NavItem {
   href: string;
@@ -30,6 +31,7 @@ const ICON_PATHS = {
 
 export default function SidebarNav({ notificationBadge }: { notificationBadge: ReactNode }) {
   const pathname = usePathname();
+  const { data: session } = useSession();
 
   const navItems: NavItem[] = [
     { href: '/', label: 'Dashboard', iconPath: ICON_PATHS.dashboard },
@@ -94,6 +96,44 @@ export default function SidebarNav({ notificationBadge }: { notificationBadge: R
               </ul>
             </li>
           </ul>
+          {/* User section */}
+          {session?.user && (
+            <div className="border-t border-white/10 pt-3 mt-3">
+              <div className="flex items-center gap-3 px-3 py-2">
+                {session.user.image ? (
+                  <div className="w-6 h-6 shrink-0" style={{ width: 24, height: 24, minWidth: 24 }}>
+                    <img
+                      src={session.user.image}
+                      alt=""
+                      width={24}
+                      height={24}
+                      className="w-full h-full rounded-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-6 h-6 rounded-full bg-orange-500/20 flex items-center justify-center shrink-0">
+                    <span className="text-[10px] font-bold text-orange-400">
+                      {session.user.name?.charAt(0)?.toUpperCase() ?? '?'}
+                    </span>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-300 truncate">{session.user.name}</p>
+                  <p className="text-xs text-gray-500 truncate">{session.user.email}</p>
+                </div>
+                <button
+                  onClick={() => signOut({ fetchOptions: { onSuccess: () => { window.location.href = '/login'; } } })}
+                  className="text-gray-500 hover:text-gray-300 transition-colors shrink-0"
+                  title="Sign out"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
         </nav>
       </div>
 

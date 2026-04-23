@@ -5,7 +5,8 @@ import { executeScrapeJob } from '@/lib/scraper/scraper';
 import { createJob, failProgress, getActiveJobs, cancelScrape, removeJob, getProgress, cleanupFinishedJobs, type JobInfo } from '@/lib/scrape-progress';
 import { db } from '@/db';
 import { monitoredWebsites, filters } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
+import { getUserId } from '@/lib/auth-server';
 
 // ---------------------------------------------------------------------------
 // Manual trigger server action — fire-and-forget.
@@ -16,6 +17,7 @@ export async function triggerScrape(
   websiteId?: string,
   filterId?: string,
 ): Promise<{ success: true; jobId: string } | { success: false; error: string }> {
+  const userId = await getUserId();
   // Clean up old finished jobs
   cleanupFinishedJobs();
 
@@ -49,6 +51,7 @@ export async function triggerScrape(
     websiteId || undefined,
     filterId || undefined,
     jobId,
+    userId,
   )
     .then(() => {
       revalidatePath('/');
@@ -89,15 +92,17 @@ export async function dismissJob(jobId: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function getActiveWebsites() {
+  const userId = await getUserId();
   return db
     .select({ id: monitoredWebsites.id, name: monitoredWebsites.name })
     .from(monitoredWebsites)
-    .where(eq(monitoredWebsites.active, true));
+    .where(and(eq(monitoredWebsites.active, true), eq(monitoredWebsites.userId, userId)));
 }
 
 export async function getActiveFilters() {
+  const userId = await getUserId();
   return db
     .select({ id: filters.id, name: filters.name })
     .from(filters)
-    .where(eq(filters.active, true));
+    .where(and(eq(filters.active, true), eq(filters.userId, userId)));
 }

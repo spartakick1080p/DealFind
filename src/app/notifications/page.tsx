@@ -7,6 +7,7 @@ import {
   dismissAll,
   type NotificationWithDeal,
 } from '@/lib/notification-service';
+import { getUserId } from '@/lib/auth-server';
 import NotificationList from '@/components/notification-list';
 
 async function handleMarkAsRead(notificationId: string) {
@@ -34,10 +35,11 @@ async function handleDismissAll() {
 }
 
 export default async function NotificationsPage() {
+  const userId = await getUserId();
   let notificationList: NotificationWithDeal[] = [];
 
   try {
-    notificationList = await getActiveNotifications();
+    notificationList = await getActiveNotifications(userId);
   } catch {
     // Graceful fallback when DB is unavailable
   }
