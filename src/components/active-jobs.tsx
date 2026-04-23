@@ -41,9 +41,18 @@ export default function ActiveJobs() {
 
   useEffect(() => {
     fetchJobs();
+    // Only poll if we have active jobs; check once on mount then stop if empty
     pollRef.current = setInterval(fetchJobs, 2000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchJobs]);
+
+  // Stop polling when there are no jobs (avoid infinite empty requests)
+  useEffect(() => {
+    if (jobs.length === 0 && pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, [jobs]);
 
   async function handleCancel(jobId: string) {
     setCancellingIds((prev) => new Set(prev).add(jobId));
