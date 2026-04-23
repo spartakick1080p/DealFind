@@ -1,4 +1,4 @@
-const CACHE_NAME = 'deal-monitor-v1';
+const CACHE_NAME = 'deal-monitor-v2';
 const PRECACHE_URLS = [
   '/',
   '/manifest.json',
@@ -26,6 +26,10 @@ self.addEventListener('fetch', (event) => {
 
   // Network-first for API/navigation, cache-first for static assets
   if (request.url.includes('/api/') || request.mode === 'navigate') {
+    // Never cache auth endpoints
+    if (request.url.includes('/api/auth/')) {
+      return;
+    }
     event.respondWith(
       fetch(request)
         .then((response) => {
