@@ -1,16 +1,16 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { executeScrapeJob } from '@/lib/scraper/scraper';
-import { createJob, failProgress, getActiveJobs, cancelScrape, removeJob, getProgress, cleanupFinishedJobs, type JobInfo } from '@/lib/scrape-progress';
+import { getActiveJobs, cancelScrape, removeJob, getProgress, cleanupFinishedJobs, type JobInfo } from '@/lib/scrape-progress';
 import { db } from '@/db';
 import { monitoredWebsites, filters } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { getUserId } from '@/lib/auth-server';
 
 // ---------------------------------------------------------------------------
-// Manual trigger server action — fire-and-forget.
-// Returns a jobId immediately so the client can poll / cancel.
+// Manual trigger server action.
+// Calls the cron API endpoint which runs the scrape synchronously within
+// a single serverless function invocation (avoids fire-and-forget issues).
 // ---------------------------------------------------------------------------
 
 export async function triggerScrape(
@@ -18,52 +18,58 @@ export async function triggerScrape(
   filterId?: string,
 ): Promise<{ success: true; jobId: string } | { success: false; error: string }> {
   const userId = await getUserId();
-  // Clean up old finished jobs
-  cleanupFinishedJobs();
 
-  // Resolve display names for the job listing
-  let websiteName: string | undefined;
-  let filterName: string | undefined;
-
+  // Verify ownership
   if (websiteId) {
     const rows = await db
-      .select({ name: monitoredWebsites.name })
+      .select({ id: monitoredWebsites.id })
       .from(monitoredWebsites)
-      .where(eq(monitoredWebsites.id, websiteId))
+      .where(and(eq(monitoredWebsites.id, websiteId), eq(monitoredWebsites.userId, userId)))
       .limit(1);
-    websiteName = rows[0]?.name;
+    if (rows.length === 0) return { success: false, error: 'Website not found' };
   }
 
   if (filterId) {
     const rows = await db
-      .select({ name: filters.name })
+      .select({ id: filters.id })
       .from(filters)
-      .where(eq(filters.id, filterId))
+      .where(and(eq(filters.id, filterId), eq(filters.userId, userId)))
       .limit(1);
-    filterName = rows[0]?.name;
+    if (rows.length === 0) return { success: false, error: 'Filter not found' };
   }
 
-  const jobId = createJob(websiteName, filterName, 'manual');
+  // Build the cron API URL
+  const baseUrl = process.env.BETTER_AUTH_URL || process.env.APP_BASE_URL || 'http://localhost:3000';
+  const cronSecret = process.env.CRON_SECRET;
 
-  // Fire and forget — don't await
-  executeScrapeJob(
-    undefined, undefined, undefined,
-    websiteId || undefined,
-    filterId || undefined,
-    jobId,
-    userId,
-  )
-    .then(() => {
-      revalidatePath('/');
-      revalidatePath('/notifications');
-    })
-    .catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error('[settings/triggerScrape] Error:', message);
-      failProgress(jobId, message);
+  if (!cronSecret) {
+    return { success: false, error: 'CRON_SECRET not configured' };
+  }
+
+  const params = new URLSearchParams();
+  if (websiteId) params.set('websiteId', websiteId);
+
+  const url = `${baseUrl}/api/cron/scrape${params.toString() ? `?${params}` : ''}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${cronSecret}` },
     });
 
-  return { success: true, jobId };
+    if (!response.ok) {
+      const body = await response.text();
+      return { success: false, error: `Scrape failed: ${body}` };
+    }
+
+    revalidatePath('/');
+    revalidatePath('/notifications');
+    revalidatePath('/scrapes');
+    return { success: true, jobId: 'manual-' + Date.now() };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message };
+  }
 }
 
 // ---------------------------------------------------------------------------
