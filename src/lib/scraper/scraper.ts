@@ -1052,7 +1052,7 @@ async function evaluateAndPersist(
   const matchedFilter = matchingFilters[0] as FilterWithId;
 
   // Use productId as the seen key so the whole product is deduped, not individual SKUs
-  const isNew = await isNewDeal(variant.productId);
+  const isNew = await isNewDeal(variant.productId, userId);
   if (!isNew) return;
 
   console.log(
@@ -1141,7 +1141,7 @@ async function evaluateAndPersist(
     })
     .returning();
 
-  await markAsSeen(variant.productId, ttlDays);
+  await markAsSeen(variant.productId, ttlDays, userId);
   await createNotification(deal.id);
   result.newDeals++;
 

@@ -7,7 +7,7 @@
 
 import { db } from '@/db';
 import { seenItems } from '@/db/schema';
-import { eq, lt } from 'drizzle-orm';
+import { and, eq, lt } from 'drizzle-orm';
 
 /**
  * Compute a composite identifier for duplicate detection.
@@ -27,12 +27,18 @@ export function computeCompositeId(
 /**
  * Check if a composite ID is new (not seen or expired).
  * Returns true if the deal is new, false if already seen and not expired.
+ * When userId is provided, checks are scoped to that user.
  */
-export async function isNewDeal(compositeId: string): Promise<boolean> {
+export async function isNewDeal(compositeId: string, userId?: string): Promise<boolean> {
+  const conditions = [eq(seenItems.compositeId, compositeId)];
+  if (userId) {
+    conditions.push(eq(seenItems.userId, userId));
+  }
+
   const rows = await db
     .select()
     .from(seenItems)
-    .where(eq(seenItems.compositeId, compositeId))
+    .where(and(...conditions))
     .limit(1);
 
   if (rows.length === 0) {
@@ -46,18 +52,20 @@ export async function isNewDeal(compositeId: string): Promise<boolean> {
 /**
  * Mark a composite ID as seen with a TTL expiry.
  * Uses upsert (insert on conflict update) to refresh TTL for existing items.
+ * The unique constraint is on (userId, compositeId).
  */
 export async function markAsSeen(
   compositeId: string,
-  ttlDays: number
+  ttlDays: number,
+  userId?: string
 ): Promise<void> {
   const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000);
 
   await db
     .insert(seenItems)
-    .values({ compositeId, expiresAt })
+    .values({ compositeId, expiresAt, userId: userId ?? null })
     .onConflictDoUpdate({
-      target: seenItems.compositeId,
+      target: [seenItems.userId, seenItems.compositeId],
       set: { expiresAt },
     });
 }
